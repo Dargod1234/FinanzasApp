@@ -164,6 +164,11 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
     'http://localhost:5173,http://localhost:3000,capacitor://localhost,http://localhost'
 ).split(',')
 
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    'CSRF_TRUSTED_ORIGINS',
+    'http://localhost:5173,http://localhost:3000'
+).split(',')
+
 
 # === Cache (para OTP) ===
 CACHES = {
