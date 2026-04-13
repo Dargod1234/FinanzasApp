@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-finanzas_db}
+      POSTGRES_USER: ${DB_USER:-finanzas_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-finanzas_user} -d ${DB_NAME:-finanzas_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: "postgres://${DB_USER:-finanzas_user}:${DB_PASSWORD}@db:5432/${DB_NAME:-finanzas_db}"
+      DB_HOST: db
+      DB_PORT: 5432
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py createcachetable 2>/dev/null;
+             gunicorn finanzas.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
+
+volumes:
+  postgres_data:
