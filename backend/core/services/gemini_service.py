@@ -1,13 +1,13 @@
 ﻿import json
 import logging
-import google.generativeai as genai
-
+from google import genai
+from google.genai import types
 from django.conf import settings
 from .circuit_breaker import gemini_breaker
 
 logger = logging.getLogger(__name__)
 
-# Prompt System (se carga una sola vez)
+# Prompt System optimizado para comprobantes colombianos
 SYSTEM_PROMPT = """
 ROL: Eres un motor de extracción de datos financieros especializado en comprobantes bancarios colombianos. Tu única función es analizar imágenes de comprobantes de transferencias y devolver datos estructurados en JSON.
 
@@ -17,15 +17,11 @@ ENTIDADES SOPORTADAS:
 - Bancolombia (transferencias y pagos)
 
 INSTRUCCIONES ESTRICTAS:
-
 1. ANALIZA la imagen recibida e identifica si es un comprobante bancario válido.
-
 2. Si NO es un comprobante bancario, responde EXACTAMENTE:
    {"error": "not_a_receipt", "message": "La imagen no parece ser un comprobante bancario."}
-
 3. Si la imagen es de BAJA CALIDAD (borrosa, cortada, ilegible), responde EXACTAMENTE:
    {"error": "low_quality", "message": "La imagen no es suficientemente clara para extraer datos."}
-
 4. Si ES un comprobante válido, extrae TODOS estos campos:
    - monto: número sin formato (ej: 150000)
    - referencia_bancaria: código único de la transacción
@@ -36,60 +32,49 @@ INSTRUCCIONES ESTRICTAS:
    - emisor: nombre emisor
    - descripcion: motivo del pago
    - confianza: 0.0 a 1.0
-
-5. Si ambos (emisor y destinatario) parecen ser la misma persona -> tipo = "transferencia_propia"
-6. Si confianza < 0.5 -> devolver error "low_quality"
-7. SIEMPRE responde SOLO con JSON puro, sin markdown. NUNCA inventes datos.
+5. Si confianza < 0.5 -> devolver error "low_quality"
+6. SIEMPRE responde SOLO con JSON puro, sin markdown.
 """.strip()
 
-USER_PROMPT = "Extrae los datos de este comprobante bancario colombiano. Responde SOLO con JSON válido."
-
-
 class GeminiOCRService:
-    """Servicio para extraer datos de comprobantes usando Gemini 1.5 Flash."""
+    """Servicio para extraer datos de comprobantes usando el SDK Unificado v1 y Gemini 2.0 Flash."""
 
     def __init__(self):
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel(
-            model_name='gemini-1.5-flash',
-            system_instruction=SYSTEM_PROMPT
+        # Según la investigación: Usar SDK Unificado (import google.genai)
+        # Forzar api_version='v1' para estabilidad
+        self.client = genai.Client(
+            api_key=settings.GEMINI_API_KEY,
+            http_options=types.HttpOptions(api_version='v1')
         )
+        # Migramos a gemini-2.0-flash para evitar el Error 404 del modelo 1.5
+        self.model_id = 'gemini-2.0-flash'
 
     def extract_from_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         """
         Procesa una imagen de comprobante y retorna datos estructurados.
-
-        Args:
-            image_bytes: Bytes de la imagen
-            mime_type: Tipo MIME (image/jpeg, image/png, image/webp)
-
-        Returns:
-            dict con datos extraídos o error
         """
         # Verificar circuit breaker
         if not gemini_breaker.can_execute():
             logger.warning("Circuit breaker OPEN — Gemini no disponible")
             return {
                 "error": "service_unavailable",
-                "message": "El servicio de procesamiento no está disponible. Tu comprobante será procesado cuando se restablezca."
+                "message": "El servicio de procesamiento no está disponible temporalmente."
             }
 
         try:
-            # Preparar imagen para Gemini
-            image_part = {
-                "mime_type": mime_type,
-                "data": image_bytes
-            }
-
-            # Enviar a Gemini con configuración JSON
-            response = self.model.generate_content(
-                [USER_PROMPT, image_part],
-                generation_config=genai.GenerationConfig(
-                    temperature=0.1,
+            # En el nuevo SDK v1, los contenidos se pasan con types.Part
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    "Extrae los datos de este comprobante bancario colombiano. Responde SOLO con JSON válido."
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.0, # Precisión máxima
                     max_output_tokens=1024,
                     response_mime_type="application/json",
-                ),
-                request_options={"timeout": 30}
+                    system_instruction=SYSTEM_PROMPT
+                )
             )
 
             # Parsear respuesta JSON
@@ -103,36 +88,25 @@ class GeminiOCRService:
             result['raw_response'] = raw_text
 
             # Validar estructura mínima
-            if 'error' in result:
-                return result
-
             required_fields = ['monto', 'referencia_bancaria', 'entidad']
             missing = [f for f in required_fields if not result.get(f)]
-            if missing:
-                logger.warning(f"Campos faltantes en respuesta Gemini: {missing}")
+            if missing and 'error' not in result:
+                logger.warning(f"Campos faltantes en respuesta: {missing}")
                 result['confianza'] = min(result.get('confianza', 0.5), 0.5)
 
             return result
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Gemini devolvió JSON inválido: {e}")
-            gemini_breaker.record_failure()
-            return {
-                "error": "invalid_response",
-                "message": "No se pudo procesar la respuesta del motor IA."
-            }
         except Exception as e:
-            logger.error(f"Error al llamar Gemini: {e}")
+            logger.error(f"Error en OCR (Gemini 2.0): {e}")
             gemini_breaker.record_failure()
             return {
                 "error": "processing_error",
-                "message": "Error al procesar la imagen. Intenta de nuevo."
+                "message": f"Error al procesar la imagen: {str(e)}"
             }
 
 
 # Singleton para reusar la conexión
 _gemini_service = None
-
 
 def get_gemini_service() -> GeminiOCRService:
     global _gemini_service
