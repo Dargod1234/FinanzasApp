@@ -37,72 +37,66 @@ INSTRUCCIONES ESTRICTAS:
 """.strip()
 
 class GeminiOCRService:
-    """Servicio para extraer datos de comprobantes usando el SDK Unificado y Gemini 2.0 Flash."""
+    """Servicio para extraer datos de comprobantes usando el SDK Unificado y Gemini 2.5 Flash."""
 
     def __init__(self):
-        # Inicialización limpia para SDK 2026 ignorando listado de modelos (evita 501 Unimplemented)
+        # Inicialización del cliente unificado
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        # Usamos el modelo sucesor de la serie 1.5 para máxima compatibilidad
-        self.model_id = 'gemini-2.0-flash'
+        # El modelo validado como activo: gemini-2.5-flash
+        self.model_id = 'gemini-2.5-flash'
 
     def extract_from_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         """
-        Procesa una imagen de comprobante y retorna datos estructurados.
+        Extrae datos de comprobantes de Nequi/Daviplata/Bancolombia.
         """
-        # Verificar circuit breaker
         if not gemini_breaker.can_execute():
             logger.warning("Circuit breaker OPEN — Gemini no disponible")
             return {
-                "error": "service_unavailable",
-                "message": "El servicio de procesamiento no está disponible temporalmente."
+                "error": "service_unavailable", 
+                "message": "Servicio temporalmente fuera de línea."
             }
 
         try:
-            # Configuración de generación según tu investigación
-            generate_config = types.GenerateContentConfig(
+            # Configuración específica para JSON y precisión financiera
+            config = types.GenerateContentConfig(
                 temperature=0.1,
                 max_output_tokens=1024,
                 response_mime_type="application/json",
                 system_instruction=SYSTEM_PROMPT
             )
 
-            # Llamada directa (sin pasar por list_models para evitar Error 501)
+            # Llamada al modelo con la imagen en bytes
             response = self.client.models.generate_content(
                 model=self.model_id,
                 contents=[
                     types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                    "Extrae los datos de este comprobante colombiano. Responde SOLO con JSON válido."
+                    "Extrae los datos de este comprobante bancario colombiano."
                 ],
-                config=generate_config
+                config=config
             )
 
-            # Parsear respuesta JSON
+            # Parsear la respuesta JSON
             raw_text = response.text.strip()
             result = json.loads(raw_text)
-
+            
             # Registrar éxito en circuit breaker
             gemini_breaker.record_success()
-
+            
+            # Log de éxito para monitoreo
+            logger.info(f"OCR Exitoso: {result.get('entidad')} - {result.get('referencia_bancaria')}")
+            
             # Agregar respuesta cruda para debugging
             result['raw_response'] = raw_text
-
-            # Validar estructura mínima
-            required_fields = ['monto', 'referencia_bancaria', 'entidad']
-            missing = [f for f in required_fields if not result.get(f)]
-            if missing and 'error' not in result:
-                logger.warning(f"Campos faltantes en respuesta: {missing}")
-                result['confianza'] = min(result.get('confianza', 0.5), 0.5)
-
+            
             return result
 
         except Exception as e:
-            logger.error(f"Error crítico en Gemini (OCR Directo): {e}")
+            logger.error(f"Error procesando imagen con Gemini 2.5: {e}")
             gemini_breaker.record_failure()
             return {
-                "error": "extraction_error",
-                "message": f"Error al extraer datos: {str(e)}"
+                "error": "processing_error",
+                "message": "No pudimos leer el comprobante. Asegúrate de que la foto sea clara."
             }
-
 
 # Singleton para reusar la conexión
 _gemini_service = None
