@@ -80,7 +80,7 @@ class GeminiOCRService:
 
             # Enviar a Gemini con configuración JSON
             response = self.client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='models/gemini-1.5-flash',
                 contents=[
                     USER_PROMPT,
                     image_part
