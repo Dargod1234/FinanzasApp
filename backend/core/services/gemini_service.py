@@ -1,10 +1,7 @@
 import json
 import logging
-import warnings
 
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    import google.generativeai as genai
+import google.genai as genai
 
 from django.conf import settings
 from .circuit_breaker import gemini_breaker
@@ -53,16 +50,7 @@ class GeminiOCRService:
     """Servicio para extraer datos de comprobantes usando Gemini 1.5 Flash."""
 
     def __init__(self):
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel(
-            model_name='gemini-1.5-flash',
-            system_instruction=SYSTEM_PROMPT,
-            generation_config=genai.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=1024,
-                response_mime_type="application/json",
-            )
-        )
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
     def extract_from_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         """
@@ -85,15 +73,24 @@ class GeminiOCRService:
 
         try:
             # Preparar imagen para Gemini
-            image_part = {
-                "mime_type": mime_type,
-                "data": image_bytes
-            }
+            image_part = genai.Part.from_bytes(
+                data=image_bytes,
+                mime_type=mime_type
+            )
 
-            # Enviar a Gemini
-            response = self.model.generate_content(
-                [USER_PROMPT, image_part],
-                request_options={"timeout": 30}
+            # Enviar a Gemini con configuración JSON
+            response = self.client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=[
+                    USER_PROMPT,
+                    image_part
+                ],
+                config=genai.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=1024,
+                    response_mime_type="application/json",
+                    system_instruction=SYSTEM_PROMPT
+                )
             )
 
             # Parsear respuesta JSON
