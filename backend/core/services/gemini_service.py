@@ -1,7 +1,6 @@
-import json
+﻿import json
 import logging
-
-import google.genai as genai
+import google.generativeai as genai
 
 from django.conf import settings
 from .circuit_breaker import gemini_breaker
@@ -38,8 +37,8 @@ INSTRUCCIONES ESTRICTAS:
    - descripcion: motivo del pago
    - confianza: 0.0 a 1.0
 
-5. Si ambos (emisor y destinatario) parecen ser la misma persona → tipo = "transferencia_propia"
-6. Si confianza < 0.5 → devolver error "low_quality"
+5. Si ambos (emisor y destinatario) parecen ser la misma persona -> tipo = "transferencia_propia"
+6. Si confianza < 0.5 -> devolver error "low_quality"
 7. SIEMPRE responde SOLO con JSON puro, sin markdown. NUNCA inventes datos.
 """.strip()
 
@@ -50,7 +49,11 @@ class GeminiOCRService:
     """Servicio para extraer datos de comprobantes usando Gemini 1.5 Flash."""
 
     def __init__(self):
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.model = genai.GenerativeModel(
+            model_name='gemini-1.5-flash',
+            system_instruction=SYSTEM_PROMPT
+        )
 
     def extract_from_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         """
@@ -73,24 +76,20 @@ class GeminiOCRService:
 
         try:
             # Preparar imagen para Gemini
-            image_part = genai.Part.from_bytes(
-                data=image_bytes,
-                mime_type=mime_type
-            )
+            image_part = {
+                "mime_type": mime_type,
+                "data": image_bytes
+            }
 
             # Enviar a Gemini con configuración JSON
-            response = self.client.models.generate_content(
-                model='models/gemini-1.5-flash',
-                contents=[
-                    USER_PROMPT,
-                    image_part
-                ],
-                config=genai.GenerateContentConfig(
+            response = self.model.generate_content(
+                [USER_PROMPT, image_part],
+                generation_config=genai.GenerationConfig(
                     temperature=0.1,
                     max_output_tokens=1024,
                     response_mime_type="application/json",
-                    system_instruction=SYSTEM_PROMPT
-                )
+                ),
+                request_options={"timeout": 30}
             )
 
             # Parsear respuesta JSON
