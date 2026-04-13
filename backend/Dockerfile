@@ -18,7 +18,10 @@ FROM base AS app
 
 COPY backend/ .
 
-RUN python manage.py collectstatic --noinput 2>/dev/null || true
+RUN DJANGO_SECRET_KEY=build-static-key \
+    DJANGO_DEBUG=False \
+    DATABASE_URL=sqlite:///tmp/build.db \
+    python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
