@@ -7,7 +7,7 @@ from .circuit_breaker import gemini_breaker
 
 logger = logging.getLogger(__name__)
 
-# Prompt System optimizado para comprobantes colombianos
+# Prompt System optimizado para comprobantes colombianos (Nequi, Daviplata, Bancolombia)
 SYSTEM_PROMPT = """
 ROL: Eres un motor de extracción de datos financieros especializado en comprobantes bancarios colombianos. Tu única función es analizar imágenes de comprobantes de transferencias y devolver datos estructurados en JSON.
 
@@ -37,16 +37,12 @@ INSTRUCCIONES ESTRICTAS:
 """.strip()
 
 class GeminiOCRService:
-    """Servicio para extraer datos de comprobantes usando el SDK Unificado v1 y Gemini 2.0 Flash."""
+    """Servicio para extraer datos de comprobantes usando el SDK Unificado y Gemini 2.0 Flash."""
 
     def __init__(self):
-        # Según la investigación: Usar SDK Unificado (import google.genai)
-        # Forzar api_version='v1' para estabilidad
-        self.client = genai.Client(
-            api_key=settings.GEMINI_API_KEY,
-            http_options=types.HttpOptions(api_version='v1')
-        )
-        # Migramos a gemini-2.0-flash para evitar el Error 404 del modelo 1.5
+        # Inicialización limpia para SDK 2026 ignorando listado de modelos (evita 501 Unimplemented)
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        # Usamos el modelo sucesor de la serie 1.5 para máxima compatibilidad
         self.model_id = 'gemini-2.0-flash'
 
     def extract_from_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
@@ -62,19 +58,22 @@ class GeminiOCRService:
             }
 
         try:
-            # En el nuevo SDK v1, los contenidos se pasan con types.Part
+            # Configuración de generación según tu investigación
+            generate_config = types.GenerateContentConfig(
+                temperature=0.1,
+                max_output_tokens=1024,
+                response_mime_type="application/json",
+                system_instruction=SYSTEM_PROMPT
+            )
+
+            # Llamada directa (sin pasar por list_models para evitar Error 501)
             response = self.client.models.generate_content(
                 model=self.model_id,
                 contents=[
                     types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                    "Extrae los datos de este comprobante bancario colombiano. Responde SOLO con JSON válido."
+                    "Extrae los datos de este comprobante colombiano. Responde SOLO con JSON válido."
                 ],
-                config=types.GenerateContentConfig(
-                    temperature=0.0, # Precisión máxima
-                    max_output_tokens=1024,
-                    response_mime_type="application/json",
-                    system_instruction=SYSTEM_PROMPT
-                )
+                config=generate_config
             )
 
             # Parsear respuesta JSON
@@ -97,11 +96,11 @@ class GeminiOCRService:
             return result
 
         except Exception as e:
-            logger.error(f"Error en OCR (Gemini 2.0): {e}")
+            logger.error(f"Error crítico en Gemini (OCR Directo): {e}")
             gemini_breaker.record_failure()
             return {
-                "error": "processing_error",
-                "message": f"Error al procesar la imagen: {str(e)}"
+                "error": "extraction_error",
+                "message": f"Error al extraer datos: {str(e)}"
             }
 
 
