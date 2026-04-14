@@ -163,14 +163,16 @@ SIMPLE_JWT = {
 
 
 # === CORS ===
+CORS_ALLOW_ALL_ORIGINS = True # Temporalmente para debuggear el login en Android
+
 CORS_ALLOWED_ORIGINS = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
-    'http://localhost:5173,http://localhost:3000,capacitor://localhost,http://localhost'
+    'http://localhost:5173,http://localhost:3000,capacitor://localhost,http://localhost,https://localhost'
 ).split(',')
 
 CSRF_TRUSTED_ORIGINS = os.environ.get(
     'CSRF_TRUSTED_ORIGINS',
-    'http://localhost:5173,http://localhost:3000'
+    'http://localhost:5173,http://localhost:3000,https://app.portalph.tech,capacitor://localhost,https://localhost'
 ).split(',')
 
 
