@@ -10,12 +10,23 @@ class FieldEncryptor:
     """
 
     def __init__(self):
-        key_b64 = os.environ.get('FIELD_ENCRYPTION_KEY')
-        if not key_b64:
+        key_str = os.environ.get('FIELD_ENCRYPTION_KEY', '').strip()
+        if not key_str:
             raise ValueError("FIELD_ENCRYPTION_KEY no está configurada")
-        self.key = base64.b64decode(key_b64)
+        
+        # Corregir padding si falta para evitar "Invalid base64-encoded string"
+        missing_padding = len(key_str) % 4
+        if missing_padding:
+            key_str += '=' * (4 - missing_padding)
+            
+        try:
+            self.key = base64.urlsafe_b64decode(key_str)
+        except Exception:
+            # Reintentar con b64decode estándar si urlsafe falla
+            self.key = base64.b64decode(key_str)
+
         if len(self.key) != 32:
-            raise ValueError("La clave debe tener exactamente 32 bytes (256 bits)")
+            raise ValueError(f"La clave debe tener 32 bytes tras decodificar (tiene {len(self.key)})")
 
     def encrypt(self, plaintext: str) -> str:
         """Encripta un string y devuelve base64(nonce + ciphertext)."""
