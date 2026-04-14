@@ -17,13 +17,19 @@ def request_otp(request):
     Solicitar envío de OTP al número de celular.
     POST: { "phone_number": "+573001234567" }
     """
-    phone = request.data.get('phone_number', '').strip()
+    raw_phone = str(request.data.get('phone_number', '')).strip()
     
-    # Limpiar espacios si el usuario los puso
-    phone = phone.replace(" ", "")
+    # Limpieza profunda: Solo dejar el '+' y los dígitos
+    phone = '+' + re.sub(r'\D', '', raw_phone)
+    
+    # Si el usuario mandó 10 dígitos sin el +57, arreglarlo
+    if len(phone) == 11 and phone.startswith('+3'): # +300... -> +57300...
+         phone = '+57' + phone[1:]
+    elif len(phone) == 14 and phone.startswith('+5757'): # Error común de doble prefijo
+         phone = '+57' + phone[5:]
 
     if not re.match(r'^\+57\d{10}$', phone):
-        logger.warning(f"Intento de registro con formato inválido: {phone}")
+        logger.warning(f"Intento de registro con formato inválido: {raw_phone} -> {phone}")
         return Response(
             {'detail': 'Formato inválido. Usa +57 seguido de 10 dígitos (ej: +573001234567).'},
             status=status.HTTP_400_BAD_REQUEST
