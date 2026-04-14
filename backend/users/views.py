@@ -6,6 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from .serializers import PhoneRegistrationSerializer, ProfileSerializer
 from .otp_service import OTPService
+from django.conf import settings
 from whatsapp.meta_api import send_text_message
 
 logger = logging.getLogger(__name__)

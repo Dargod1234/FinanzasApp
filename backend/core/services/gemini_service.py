@@ -33,13 +33,13 @@ INSTRUCCIONES ESTRICTAS:
 """.strip()
 
 class GeminiOCRService:
-    """Servicio para extraer datos de comprobantes usando el SDK Unificado y Gemini 3.1 Flash-Lite."""
+    """Servicio para extraer datos de comprobantes usando el SDK Unificado y Gemini 2.5 Flash."""
 
     def __init__(self):
         # Inicialización del cliente unificado
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        # El modelo validado como más eficiente para OCR en 2026: gemini-3.1-flash-lite-preview
-        self.model_id = 'gemini-3.1-flash-lite-preview'
+        # El modelo validado como más eficiente para OCR: gemini-2.5-flash
+        self.model_id = 'gemini-2.5-flash'
 
     def extract_from_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         """
