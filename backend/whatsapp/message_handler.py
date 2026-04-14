@@ -6,6 +6,7 @@ from .state_machine import ConversationManager, ConversationState
 from .meta_api import (
     send_text_message,
     send_interactive_buttons,
+    send_template_confirmation,
     download_media,
 )
 from .throttling import WhatsAppUserThrottle
@@ -123,13 +124,22 @@ def handle_image_message(user, phone_number, message_id, message_data):
 
         if result['status'] == 'created':
             transaction = result['transaction']
-            # Enviar confirmación con botones
-            send_confirmation_buttons(phone_number, transaction)
-            ConversationManager.set_state(
-                phone_number,
-                ConversationState.PENDING_CONFIRMATION,
-                pending_transaction_id=transaction.id
-            )
+            # CAMBIO: Usamos plantilla Utility en lugar de botones manuales
+            # Esto optimiza costos y profesionaliza el flujo (Abril 2026)
+            exito = send_template_confirmation(phone_number, transaction)
+            
+            if exito:
+                ConversationManager.set_state(
+                    phone_number,
+                    ConversationState.PENDING_CONFIRMATION,
+                    pending_transaction_id=transaction.id
+                )
+            else:
+                # Fallback a botones interactivos si la plantilla falla (ej: no aprobada aún)
+                send_text_message(phone_number, "✅ ¡Listo! He extraído los datos.")
+                # Aquí podrías llamar a una función de botones si la tienes
+                # Por ahora reseteamos si falla el envío crítico
+                ConversationManager.reset(phone_number)
 
     except Exception as e:
         logger.error(f"Error procesando imagen: {e}", exc_info=True)

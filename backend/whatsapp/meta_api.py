@@ -56,6 +56,35 @@ def send_text_message(phone_number: str, text: str) -> bool:
     })
 
 
+def send_template_confirmation(phone_number: str, transaction) -> bool:
+    """
+    Envía una plantilla de utilidad (Utility) para confirmar la transacción.
+    """
+    # Formateo exacto para que coincida con las muestras de Meta
+    monto_formateado = f"{float(transaction.amount):,.0f}"
+    entidad = str(transaction.entity).upper()
+    categoria = str(transaction.category).replace('_', ' ').title()
+
+    payload = {
+        "type": "template",
+        "template": {
+            "name": "confirmacion_gasto",
+            "language": {"code": "es"},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": monto_formateado},
+                        {"type": "text", "text": entidad},
+                        {"type": "text", "text": categoria},
+                    ]
+                }
+            ]
+        }
+    }
+    return _send_message(phone_number, payload)
+
+
 def send_interactive_buttons(phone_number: str, body: str,
                               buttons: list, header: str = None) -> bool:
     """
