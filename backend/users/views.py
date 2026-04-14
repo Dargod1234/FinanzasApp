@@ -1,10 +1,56 @@
+﻿import logging
+import re
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from .serializers import PhoneRegistrationSerializer, ProfileSerializer
 from .otp_service import OTPService
+from whatsapp.meta_api import send_text_message
 
+logger = logging.getLogger(__name__)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def request_otp(request):
+    """
+    Solicitar envío de OTP al número de celular.
+    POST: { "phone_number": "+573001234567" }
+    """
+    phone = request.data.get('phone_number', '').strip()
+    
+    # Limpiar espacios si el usuario los puso
+    phone = phone.replace(" ", "")
+
+    if not re.match(r'^\+57\d{10}$', phone):
+        logger.warning(f"Intento de registro con formato inválido: {phone}")
+        return Response(
+            {'detail': 'Formato inválido. Usa +57 seguido de 10 dígitos (ej: +573001234567).'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Generar el código
+    otp = OTPService.generate_otp(phone)
+    
+    # ENVIAR POR WHATSAPP (Integración Real 2026)
+    mensaje_otp = f"🔐 Tu código de acceso para Finanzas App es: *{otp}*\n\nNo lo compartas con nadie. Expira en 5 minutos."
+    
+    # El número para Meta debe ser sin el '+' (ej: 573001234567)
+    phone_whatsapp = phone.replace("+", "")
+    
+    exito = send_text_message(phone_whatsapp, mensaje_otp)
+
+    if exito:
+        logger.info(f"OTP enviado exitosamente a {phone}")
+        return Response({
+            'detail': 'Código OTP enviado por WhatsApp.',
+            'debug_otp': otp if settings.DEBUG else None
+        }, status=status.HTTP_200_OK)
+    else:
+        logger.error(f"Fallo al enviar OTP vía Meta API a {phone}")
+        return Response({
+            'detail': 'No pudimos enviar el código por WhatsApp. Verifica que tu número sea correcto y tengas el chat activo.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -16,7 +62,6 @@ def phone_auth(request):
     serializer = PhoneRegistrationSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
-    # Verificar OTP
     phone = serializer.validated_data['phone_number']
     otp_code = serializer.validated_data['otp_code']
 
@@ -33,36 +78,6 @@ def phone_auth(request):
         'is_new_user': result['created'],
         'onboarding_completed': result['user'].profile.onboarding_completed,
     }, status=status.HTTP_200_OK)
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def request_otp(request):
-    """
-    Solicitar envío de OTP al número de celular.
-    POST: { "phone_number": "+573001234567" }
-    """
-    phone = request.data.get('phone_number', '')
-
-    import re
-    if not re.match(r'^\+57\d{10}$', phone):
-        return Response(
-            {'detail': 'Formato inválido. Usa +57 seguido de 10 dígitos.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    otp = OTPService.generate_otp(phone)
-
-    # TODO: Enviar OTP por WhatsApp en producción
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"OTP generado para {phone}")
-
-    return Response({
-        'detail': 'Código OTP enviado.',
-        'debug_otp': otp,  # SOLO para desarrollo, remover en producción
-    }, status=status.HTTP_200_OK)
-
 
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
