@@ -43,7 +43,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=5); sys.exit(0)\"",
+          "python -c \"import socket,sys; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1',8000)); s.close(); sys.exit(0)\"",
         ]
       interval: 15s
       timeout: 7s
@@ -76,7 +76,7 @@ services:
       - /opt/finanzas-backend/ai-models:/root/.paddleocr
       - /opt/finanzas-backend/ai_ocr_service:/app
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 5
