@@ -35,7 +35,8 @@ class OCRLocalService:
             response = requests.post(url, files=files, timeout=(5, 35))
             response.raise_for_status()
 
-            extracted_text = response.text.strip()
+            data = response.json()
+            extracted_text = data.get("text", "").strip()
             if not extracted_text:
                 logger.warning("OCR local respondio sin texto")
                 return ""

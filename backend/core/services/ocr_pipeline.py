@@ -133,7 +133,7 @@ def _extract_receipt_fields(ocr_text: str) -> dict:
 
 def _extract_amount(ocr_text: str):
     labeled = re.search(
-        r"(?im)(?:monto|valor|total|pagado|importe)\s*[:$-]?\s*([0-9][0-9\s\.,]{2,})",
+        r"(?im)(?:monto|valor|total|pagado|importe|cantidad)\s*[:$\-s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[\.,]\d{2})?)",
         ocr_text,
     )
     if labeled:
