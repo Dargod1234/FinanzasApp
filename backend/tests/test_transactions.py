@@ -1,4 +1,5 @@
 """Tests for transactions app: models, CRUD endpoints, dashboard summary."""
+import base64
 import pytest
 from decimal import Decimal
 from django.utils import timezone
@@ -203,3 +204,42 @@ class TestDashboardSummary:
 
 # Import needed for user_isolation test
 from users.models import User
+
+
+class TestEncryptedTransactions:
+    def test_create_encrypted_transaction(self, authenticated_client):
+        payload = {
+            'ciphertext': base64.b64encode(b'cipher-data').decode('utf-8'),
+            'iv': base64.b64encode(b'123456789012').decode('utf-8'),
+            'salt': base64.b64encode(b'1234567890abcdef').decode('utf-8'),
+            'crypto_version': 1,
+        }
+        resp = authenticated_client.post('/api/encrypted-transactions/', payload, format='json')
+        assert resp.status_code == 201
+        assert resp.data['ciphertext'] == payload['ciphertext']
+        assert resp.data['iv'] == payload['iv']
+        assert resp.data['salt'] == payload['salt']
+
+    def test_create_encrypted_transaction_invalid_iv(self, authenticated_client):
+        payload = {
+            'ciphertext': base64.b64encode(b'cipher-data').decode('utf-8'),
+            'iv': base64.b64encode(b'short').decode('utf-8'),
+            'salt': base64.b64encode(b'1234567890abcdef').decode('utf-8'),
+        }
+        resp = authenticated_client.post('/api/encrypted-transactions/', payload, format='json')
+        assert resp.status_code == 400
+        assert 'iv' in resp.data
+
+    def test_list_encrypted_transactions(self, authenticated_client):
+        payload = {
+            'ciphertext': base64.b64encode(b'cipher-data').decode('utf-8'),
+            'iv': base64.b64encode(b'123456789012').decode('utf-8'),
+            'salt': base64.b64encode(b'1234567890abcdef').decode('utf-8'),
+        }
+        create_resp = authenticated_client.post('/api/encrypted-transactions/', payload, format='json')
+        assert create_resp.status_code == 201
+
+        resp = authenticated_client.get('/api/encrypted-transactions/')
+        assert resp.status_code == 200
+        assert resp.data['count'] >= 1
+        assert resp.data['results'][0]['id']

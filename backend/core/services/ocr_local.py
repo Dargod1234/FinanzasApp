@@ -2,6 +2,7 @@ import logging
 import gc
 import io
 from typing import Optional
+import json
 
 import requests
 from django.conf import settings
@@ -39,7 +40,7 @@ class OCRLocalService:
             response = requests.post(url, files=files, timeout=(5, 35))
             response.raise_for_status()
 
-            extracted_text = response.text.strip()
+            extracted_text = OCRLocalService._parse_ocr_response(response)
             if not extracted_text:
                 logger.warning("OCR local respondio sin texto")
                 return ""
@@ -63,3 +64,30 @@ class OCRLocalService:
             del image_stream
             del image_bytes
             gc.collect()
+
+    @staticmethod
+    def _parse_ocr_response(response: requests.Response) -> str:
+        """
+        Soporta dos contratos del microservicio OCR:
+        1) JSON: {"status":"success","text":"..."}
+        2) Texto plano en body.
+        """
+        content_type = (response.headers.get("Content-Type") or "").lower()
+        body = response.text or ""
+
+        # Si el servidor declara JSON, o el cuerpo parece JSON, intentar parsear.
+        if "application/json" in content_type or body.strip().startswith("{"):
+            try:
+                parsed = response.json()
+            except (ValueError, json.JSONDecodeError):
+                parsed = None
+
+            if isinstance(parsed, dict):
+                if parsed.get("status") == "error":
+                    logger.warning("OCR local respondio estado error")
+                    return ""
+                text = parsed.get("text")
+                if isinstance(text, str):
+                    return text.strip()
+
+        return body.strip()

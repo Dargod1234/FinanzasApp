@@ -2,7 +2,7 @@
 
 > **Proyecto:** Finanzas App  
 > **Versión:** 1.0.0 (MVP)  
-> **Última actualización:** 2026-04-07  
+> **Última actualización:** 2026-04-15  
 > **Sprint Actual:** Sprint 3 — Frontend App (COMPLETADO)
 
 ---
@@ -112,13 +112,13 @@ Backend:
   docker: CONFIGURADO (Dockerfile + docker-compose.yml + .dockerignore)
 
 IA/OCR:
-  gemini_service: IMPLEMENTADO (core/services/gemini_service.py, singleton + system prompt)
-  prompt_maestro: DEFINIDO v1.0 (integrado en gemini_service)
+  ocr_local_service: IMPLEMENTADO (core/services/ocr_local.py, cliente OCR interno)
+  prompt_maestro: HISTORICO (documentado en 02_IA_OCR_MAESTRO.md)
   circuit_breaker: IMPLEMENTADO (core/services/circuit_breaker.py, 5 fallos → OPEN, 60s recovery)
   ocr_validator: IMPLEMENTADO (core/services/ocr_validator.py)
   category_engine: IMPLEMENTADO (core/services/category_engine.py, 11 reglas)
   transaction_classifier: IMPLEMENTADO (core/services/transaction_classifier.py)
-  ocr_pipeline: IMPLEMENTADO (core/services/ocr_pipeline.py, 6 pasos)
+  ocr_pipeline: IMPLEMENTADO (core/services/ocr_pipeline.py, 6 pasos con OCR local)
 
 WhatsApp:
   webhook: IMPLEMENTADO (whatsapp/views.py, csrf_exempt + HMAC)
@@ -138,6 +138,7 @@ Frontend:
   infraestructura: types/index.ts, constants/categories.ts, utils/storage.ts, services/api.ts
   hooks: useAuth.tsx, useDashboard.ts, useTransactions.ts, useProfile.ts
   capacitor: INICIALIZADO (co.finanzasapp.app, webDir dist, SplashScreen + StatusBar config)
+  e2ee_client: IMPLEMENTADO (CryptoService PBKDF2 + API `/api/encrypted-transactions/`)
   deps_limpiadas: 18 deps eliminadas (MUI, Emotion, canvas-confetti, react-dnd, cmdk, vaul, etc.)
   archivos_creados: index.html, main.tsx, tsconfig.json + 8 módulos infraestructura + capacitor.config.ts
 

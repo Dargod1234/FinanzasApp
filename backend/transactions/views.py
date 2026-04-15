@@ -7,14 +7,39 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 
-from .models import Transaction
-from .serializers import TransactionSerializer
+from .models import EncryptedTransaction, Transaction
+from .serializers import (
+    EncryptedTransactionCreateSerializer,
+    EncryptedTransactionListSerializer,
+    TransactionSerializer,
+)
 
 
 class TransactionPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'
     max_page_size = 100
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def encrypted_transaction_list_create(request):
+    """Almacen y listado ciego de transacciones cifradas (E2EE)."""
+    if request.method == 'POST':
+        serializer = EncryptedTransactionCreateSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        obj = serializer.save()
+        output = EncryptedTransactionListSerializer(obj)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+    encrypted_qs = EncryptedTransaction.objects.filter(user=request.user)
+    paginator = TransactionPagination()
+    page = paginator.paginate_queryset(encrypted_qs, request)
+    serializer = EncryptedTransactionListSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 
 @api_view(['GET'])
