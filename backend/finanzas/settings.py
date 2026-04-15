@@ -77,14 +77,14 @@ WSGI_APPLICATION = 'finanzas.wsgi.application'
 
 # Database
 # En desarrollo: SQLite. En producción: PostgreSQL 16.
-if os.environ.get('DATABASE_URL'):
+if os.environ.get('DB_NAME'):  # <--- Cambio: usar DB_NAME en lugar de DATABASE_URL
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': os.environ.get('DB_NAME', 'finanzas_db'),
             'USER': os.environ.get('DB_USER', 'finanzas_user'),
             'PASSWORD': os.environ.get('DB_PASSWORD', ''),
-            'HOST': os.environ.get('DB_HOST', 'localhost'),
+            'HOST': os.environ.get('DB_HOST', '172.17.0.1'), # <--- Cambio: usar la variable de entorno
             'PORT': os.environ.get('DB_PORT', '5432'),
         }
     }
@@ -167,12 +167,12 @@ CORS_ALLOW_ALL_ORIGINS = True # Temporalmente para debuggear el login en Android
 
 CORS_ALLOWED_ORIGINS = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
-    'http://localhost:5173,http://localhost:3000,capacitor://localhost,http://localhost,https://localhost'
+    'http://localhost:5173,http://localhost:3000'
 ).split(',')
 
 CSRF_TRUSTED_ORIGINS = os.environ.get(
     'CSRF_TRUSTED_ORIGINS',
-    'http://localhost:5173,http://localhost:3000,https://app.portalph.tech,capacitor://localhost,https://localhost'
+    'https://app.portalph.tech'
 ).split(',')
 
 
