@@ -1,6 +1,10 @@
+version: '3.8'
 services:
+  # --- POSTGRES LOCAL (OPCIONAL) ---
+  # Uso: docker-compose --profile local-db up -d --build
   db:
     image: postgres:16-alpine
+    profiles: ["local-db"]
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-finanzas_db}
@@ -16,6 +20,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- BACKEND DJANGO ---
   backend:
     build:
       context: .
@@ -23,19 +28,63 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
     env_file:
-      - ./backend/.env
+      - ${ENV_FILE:-/opt/finanzas-backend/.env}
     environment:
-      DATABASE_URL: "postgres://${DB_USER:-finanzas_user}:${DB_PASSWORD}@db:5432/${DB_NAME:-finanzas_db}"
-      DB_HOST: db
-      DB_PORT: 5432
+      DB_HOST: ${DB_HOST:-172.17.0.1}
+      DB_PORT: ${DB_PORT:-5432}
+      OCR_SERVICE_URL: "http://ocr-engine:8000/process"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /opt/finanzas-backend/staticfiles:/app/staticfiles
+      - /opt/finanzas-backend/backend/finanzas/settings.py:/app/finanzas/settings.py:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=5); sys.exit(0)\"",
+        ]
+      interval: 15s
+      timeout: 7s
+      retries: 5
+      start_period: 45s
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py createcachetable 2>/dev/null;
              gunicorn finanzas.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
+    depends_on:
+      ocr-engine:
+        condition: service_healthy
+
+  # --- MOTOR DE OCR LOCAL (PADDLEOCR) ---
+  ocr-engine:
+    build: ./ai_ocr_service
+    container_name: ocr_service
+    restart: unless-stopped
+    environment:
+      # --- FIX PARA ERROR onednn_instruction.cc (PIR Regression) ---
+      - FLAGS_enable_pir_api=0
+      - FLAGS_enable_new_ir_api=0
+      - FLAGS_use_mkldnn=0
+
+      # --- OPTIMIZACION DE MEMORIA Y RENDIMIENTO ---
+      - FLAGS_eager_delete_scope=True
+      - FLAGS_allocator_strategy=naive_best_fit
+      - PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+    volumes:
+      - /opt/finanzas-backend/ai-models:/root/.paddleocr
+      - /opt/finanzas-backend/ai_ocr_service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 3.5G
 
 volumes:
   postgres_data:
