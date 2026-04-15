@@ -192,8 +192,8 @@ META_ACCESS_TOKEN = os.environ.get('META_ACCESS_TOKEN', '')
 META_PHONE_NUMBER_ID = os.environ.get('META_PHONE_NUMBER_ID', '')
 
 
-# === Gemini ===
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+# === OCR Local ===
+OCR_SERVICE_URL = os.environ.get('OCR_SERVICE_URL', 'http://ocr-engine:8000/process')
 
 
 # === Logging ===

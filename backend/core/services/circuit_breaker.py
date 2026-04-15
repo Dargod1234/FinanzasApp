@@ -4,11 +4,11 @@ from enum import Enum
 
 class CircuitState(Enum):
     CLOSED = "closed"        # Funcionando normal
-    OPEN = "open"            # Cortado — no intenta llamar a Gemini
-    HALF_OPEN = "half_open"  # Probando si Gemini ya se recuperó
+    OPEN = "open"            # Cortado - no intenta llamar al OCR
+    HALF_OPEN = "half_open"  # Probando si el OCR ya se recupero
 
 
-class GeminiCircuitBreaker:
+class OCRCircuitBreaker:
     def __init__(self, failure_threshold=5, recovery_timeout=60):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -40,4 +40,4 @@ class GeminiCircuitBreaker:
 
 
 # Singleton
-gemini_breaker = GeminiCircuitBreaker()
+ocr_breaker = OCRCircuitBreaker()

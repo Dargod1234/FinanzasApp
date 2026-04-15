@@ -46,7 +46,7 @@ class TransactionService:
                 estado='pending',
                 confianza_ia=ocr_data.get('confianza', 0.0),
                 whatsapp_message_id=whatsapp_message_id,
-                raw_gemini_response=ocr_data.get('raw_response'),
+                raw_ocr_response=ocr_data.get('raw_response'),
             )
             return {
                 'status': 'created',

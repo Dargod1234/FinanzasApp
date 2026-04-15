@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from core.encryption import FieldEncryptor
 from core.fields import EncryptedCharField
-from core.services.circuit_breaker import GeminiCircuitBreaker, CircuitState
+from core.services.circuit_breaker import OCRCircuitBreaker, CircuitState
 from core.services.category_engine import infer_category
 from core.services.transaction_classifier import classify_transaction_type
 from core.services.ocr_validator import validate_ocr_response
@@ -50,19 +50,19 @@ class TestFieldEncryptor:
 
 class TestCircuitBreaker:
     def test_initial_state_closed(self):
-        cb = GeminiCircuitBreaker()
+        cb = OCRCircuitBreaker()
         assert cb.state == CircuitState.CLOSED
         assert cb.can_execute() is True
 
     def test_opens_after_threshold(self):
-        cb = GeminiCircuitBreaker(failure_threshold=3, recovery_timeout=60)
+        cb = OCRCircuitBreaker(failure_threshold=3, recovery_timeout=60)
         for _ in range(3):
             cb.record_failure()
         assert cb.state == CircuitState.OPEN
         assert cb.can_execute() is False
 
     def test_resets_on_success(self):
-        cb = GeminiCircuitBreaker(failure_threshold=3)
+        cb = OCRCircuitBreaker(failure_threshold=3)
         cb.record_failure()
         cb.record_failure()
         cb.record_success()
@@ -71,7 +71,7 @@ class TestCircuitBreaker:
 
     def test_half_open_after_timeout(self):
         import time
-        cb = GeminiCircuitBreaker(failure_threshold=1, recovery_timeout=0)
+        cb = OCRCircuitBreaker(failure_threshold=1, recovery_timeout=0)
         cb.record_failure()
         assert cb.state == CircuitState.OPEN
         # With 0 timeout, should transition to HALF_OPEN immediately
@@ -129,7 +129,7 @@ class TestTransactionClassifier:
         )
         assert result == 'gasto'
 
-    def test_falls_back_to_gemini(self):
+    def test_falls_back_to_initial_type(self):
         result = classify_transaction_type({
             'emisor': '',
             'destinatario': '',
@@ -168,7 +168,7 @@ class TestOCRValidator:
         })
         assert result.get('error') == 'validation_failed'
 
-    def test_passthrough_gemini_error(self):
+    def test_passthrough_pipeline_error(self):
         result = validate_ocr_response({
             'error': 'not_a_receipt',
             'message': 'Not a receipt'

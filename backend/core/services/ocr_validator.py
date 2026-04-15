@@ -17,10 +17,10 @@ OCR_SCHEMA = {
 
 def validate_ocr_response(data: dict) -> dict:
     """
-    Valida y normaliza la respuesta de Gemini.
+    Valida y normaliza la respuesta estructurada del OCR.
     Retorna datos limpios o dict con error.
     """
-    # Si Gemini ya devolvió un error, retornarlo tal cual
+    # Si el pipeline ya devolvio un error, retornarlo tal cual
     if 'error' in data:
         return data
 

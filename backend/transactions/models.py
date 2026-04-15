@@ -93,10 +93,10 @@ class Transaction(models.Model):
         null=True,
         help_text="ID del mensaje de WhatsApp original"
     )
-    raw_gemini_response = models.JSONField(
+    raw_ocr_response = models.JSONField(
         blank=True,
         null=True,
-        help_text="Respuesta cruda de Gemini para debugging"
+        help_text="Respuesta cruda del OCR para debugging"
     )
 
     # --- Timestamps ---
