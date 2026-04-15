@@ -5,6 +5,13 @@ from django.conf import settings
 from core.fields import EncryptedCharField
 
 
+def _uuid7_default():
+    uuid7_fn = getattr(uuid, 'uuid7', None)
+    if callable(uuid7_fn):
+        return uuid7_fn()
+    return uuid.uuid4()
+
+
 class Transaction(models.Model):
     """
     Transacción financiera extraída de un comprobante bancario.
@@ -121,6 +128,39 @@ class Transaction(models.Model):
             return Decimal(self.monto)
         except Exception:
             return Decimal('0')
+
+
+class EncryptedTransaction(models.Model):
+    """
+    Almacen ciego para E2EE.
+    El backend solo persiste blobs cifrados y metadatos criptograficos.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=_uuid7_default,
+        editable=False,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='encrypted_transactions'
+    )
+    encrypted_data = models.BinaryField()
+    nonce = models.BinaryField(max_length=12)
+    salt = models.BinaryField(max_length=16)
+    crypto_version = models.PositiveSmallIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'transactions_encrypted_transaction'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"EncryptedTransaction<{self.id}>"
 
 
 def comprobante_upload_path(instance, filename):

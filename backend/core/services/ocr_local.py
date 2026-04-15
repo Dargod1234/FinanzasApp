@@ -1,4 +1,6 @@
 import logging
+import gc
+import io
 from typing import Optional
 
 import requests
@@ -27,16 +29,17 @@ class OCRLocalService:
             return None
 
         url = getattr(settings, "OCR_SERVICE_URL", "http://ocr-engine:8000/process")
+        payload = bytearray(image_bytes)
+        image_stream = io.BytesIO(payload)
         files = {
-            "file": ("comprobante", image_bytes, mime_type or "application/octet-stream")
+            "file": ("comprobante", image_stream, mime_type or "application/octet-stream")
         }
 
         try:
             response = requests.post(url, files=files, timeout=(5, 35))
             response.raise_for_status()
 
-            data = response.json()
-            extracted_text = data.get("text", "").strip()
+            extracted_text = response.text.strip()
             if not extracted_text:
                 logger.warning("OCR local respondio sin texto")
                 return ""
@@ -53,3 +56,10 @@ class OCRLocalService:
             logger.error("Fallo de conexion con OCR local: %s", exc)
             ocr_breaker.record_failure()
             return None
+        finally:
+            image_stream.close()
+            payload[:] = b"\x00" * len(payload)
+            del payload
+            del image_stream
+            del image_bytes
+            gc.collect()
