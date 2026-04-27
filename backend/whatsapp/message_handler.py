@@ -15,6 +15,65 @@ from transactions.models import Transaction
 
 logger = logging.getLogger(__name__)
 
+# ── Categorización desde texto del usuario ───────────────────────────────────
+
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "alimentacion": [
+        "comida", "almuerzo", "desayuno", "cena", "restaurante", "mercado",
+        "supermercado", "domicilio", "rappi", "ifood", "snack", "café", "cafe",
+        "panaderia", "fruteria", "carniceria", "picada",
+    ],
+    "transporte": [
+        "taxi", "uber", "bus", "metro", "transporte", "gasolina", "combustible",
+        "parqueadero", "parking", "indriver", "cabify", "peaje", "pasaje",
+        "moto", "bicicleta", "tren",
+    ],
+    "salud": [
+        "salud", "medico", "médico", "farmacia", "drogueria", "medicina",
+        "consulta", "eps", "clinica", "clínica", "hospital", "laboratorio",
+        "dentista", "optometria", "psicólogo", "psicologo",
+    ],
+    "educacion": [
+        "educacion", "educación", "colegio", "universidad", "curso", "libro",
+        "matricula", "matrícula", "taller", "seminario", "clase", "tutor",
+        "capacitacion", "capacitación",
+    ],
+    "entretenimiento": [
+        "entretenimiento", "cine", "juego", "netflix", "spotify", "disney",
+        "musica", "música", "concierto", "deporte", "gimnasio", "gym",
+        "streaming", "suscripcion", "suscripción", "videojuego", "fiesta",
+        "bar", "discoteca",
+    ],
+    "servicios": [
+        "servicios", "agua", "luz", "gas", "internet", "celular", "telefono",
+        "teléfono", "wifi", "recarga", "arriendo", "alquiler", "vivienda",
+        "administracion", "administración", "seguros", "seguro",
+    ],
+    "ropa": [
+        "ropa", "zapatos", "zapato", "vestido", "camisa", "pantalon",
+        "pantalón", "calzado", "accesorio", "bolso", "shopping",
+    ],
+    "ahorro": [
+        "ahorro", "ahorros", "inversion", "inversión", "fondo", "cdp",
+        "depósito", "deposito",
+    ],
+}
+
+
+def _infer_category_from_text(text: str) -> str:
+    """
+    Infiere una categoría a partir del texto libre enviado por el usuario
+    junto al comprobante. Retorna el nombre de la categoría o '' si no hay match.
+    """
+    if not text:
+        return ""
+    lowered = text.lower()
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            if kw in lowered:
+                return category
+    return ""
+
 
 def handle_incoming_message(user, phone_number: str, message_id: str,
                             message_type: str, message_data: dict):
@@ -54,6 +113,8 @@ def handle_image_message(user, phone_number, message_id, message_data):
         image_info = message_data.get('image', {})
         media_id = image_info.get('id')
         mime_type = image_info.get('mime_type', 'image/jpeg')
+        # Caption opcional que el usuario envía junto a la imagen
+        caption = image_info.get('caption', '') or ''
 
         image_bytes = download_media(media_id)
         if image_bytes is None:
@@ -97,6 +158,14 @@ def handle_image_message(user, phone_number, message_id, message_data):
 
         if result['status'] == 'created':
             transaction = result['transaction']
+
+            # Aplicar categoría desde el caption del usuario si hay coincidencia
+            inferred_cat = _infer_category_from_text(caption)
+            if inferred_cat and transaction.categoria == 'sin_categorizar':
+                transaction.categoria = inferred_cat
+                transaction.save(update_fields=['categoria'])
+                logger.info("Categoría '%s' inferida del caption para tx=%s", inferred_cat, transaction.id)
+
             # CAMBIO: Usamos plantilla Utility en lugar de botones manuales
             # Esto optimiza costos y profesionaliza el flujo (Abril 2026)
             exito = send_template_confirmation(phone_number, transaction)

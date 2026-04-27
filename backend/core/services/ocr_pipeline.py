@@ -97,7 +97,29 @@ def _looks_like_receipt(ocr_text: str) -> bool:
     return marker_match and has_numeric_signal
 
 
+def _clean_ocr_text(text: str) -> str:
+    """
+    Elimina líneas de ruido del OCR: artefactos de barra de estado del teléfono,
+    caracteres sueltos, indicadores de señal, etc.
+    Conserva solo líneas con contenido relevante.
+    """
+    lines = text.splitlines()
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        if len(stripped) <= 1:
+            continue
+        if re.fullmatch(r"\d{1,3}", stripped):
+            continue
+        if re.fullmatch(r"\d+G", stripped, re.IGNORECASE):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned)
+
+
 def _extract_receipt_fields(ocr_text: str) -> dict:
+    # Limpieza de ruido antes de cualquier procesamiento
+    ocr_text = _clean_ocr_text(ocr_text)
     lowered = ocr_text.lower()
 
     # Identificación de entidad con patrones específicos y más robustos
@@ -194,20 +216,31 @@ def _calculate_confidence(
 def _extract_amount_with_source(ocr_text: str, entidad: str) -> tuple:
     """
     Retorna (monto_string, source) donde source es 'labeled' o 'fallback'.
+    Cada entidad tiene una lista de patrones intentados en orden de prioridad.
     """
-    # Patrones específicos por entidad primero
+    # Patrones específicos por entidad — lista ordenada por prioridad
     entity_patterns = {
-        "nequi": r"(?im)(?:enviaste?|recibiste?|valor|monto)\s*[:$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
-        "daviplata": r"(?im)(?:monto|valor|total)\s*[:\$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
-        "bancolombia": r"(?im)(?:valor enviado|valor|monto|total)\s*[:$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
+        "nequi": [
+            # "Cuanto?" en su propia línea, monto en la siguiente (layout real Nequi)
+            r"(?im)^[ \t]*cuanto\??[ \t]*$\r?\n[ \t]*\$?\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
+            # Etiqueta y monto en la misma línea
+            r"(?im)(?:enviaste?|recibiste?|valor|monto)\s*[:$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
+        ],
+        "daviplata": [
+            r"(?im)(?:monto|valor|total)\s*[:\$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
+        ],
+        "bancolombia": [
+            r"(?im)(?:valor enviado|valor|monto|total)\s*[:$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
+        ],
     }
 
     if entidad in entity_patterns:
-        match = re.search(entity_patterns[entidad], ocr_text)
-        if match:
-            cleaned = _to_numeric_string(match.group(1))
-            if cleaned:
-                return cleaned, "labeled"
+        for pattern in entity_patterns[entidad]:
+            match = re.search(pattern, ocr_text)
+            if match:
+                cleaned = _to_numeric_string(match.group(1))
+                if cleaned:
+                    return cleaned, "labeled"
 
     # Patrón genérico con etiquetas
     generic_pattern = r"(?im)(?:monto|valor|total|pagado|importe|cantidad|pago)\s*[:$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)"
@@ -263,17 +296,49 @@ def _extract_reference(ocr_text: str, entidad: str = "otro") -> str:
 
 # ── Fecha ───────────────────────────────────────────────────────────────────
 
+_MONTHS_ES = {
+    'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4,
+    'mayo': 5, 'junio': 6, 'julio': 7, 'agosto': 8,
+    'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12,
+}
+
+
 def _extract_date(ocr_text: str) -> str:
-    patterns = [
+    # Patrones numéricos estándar (prioridad alta)
+    numeric_patterns = [
         r"(?i)\b(\d{4}-\d{2}-\d{2}[ t]\d{2}:\d{2}(?::\d{2})?)\b",
         r"(?i)\b(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})\b",
         r"(?i)\b(\d{2}/\d{2}/\d{4})\b",
         r"(?i)\b(\d{4}-\d{2}-\d{2})\b",
     ]
-    for pattern in patterns:
+    for pattern in numeric_patterns:
         match = re.search(pattern, ocr_text)
         if match:
             return match.group(1)
+
+    # Fecha en texto español: "21 de abril de 2026 a las 05:46 p.m"
+    text_match = re.search(
+        r"(\d{1,2})\s+de\s+"
+        r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto"
+        r"|septiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})"
+        r"(?:.*?(\d{1,2}):(\d{2})\s*(a\.?\s*m\.?|p\.?\s*m\.?))?",
+        ocr_text, re.IGNORECASE
+    )
+    if text_match:
+        day = int(text_match.group(1))
+        mon = _MONTHS_ES[text_match.group(2).lower()]
+        year = int(text_match.group(3))
+        if text_match.group(4):
+            hour = int(text_match.group(4))
+            minute = int(text_match.group(5))
+            meridiem = text_match.group(6) or ""
+            if 'p' in meridiem.lower() and hour < 12:
+                hour += 12
+            elif 'a' in meridiem.lower() and hour == 12:
+                hour = 0
+            return f"{year:04d}-{mon:02d}-{day:02d} {hour:02d}:{minute:02d}"
+        return f"{year:04d}-{mon:02d}-{day:02d}"
+
     return ""
 
 
@@ -281,10 +346,16 @@ def _extract_date(ocr_text: str) -> str:
 
 def _extract_labeled_value(ocr_text: str, labels) -> str:
     for label in labels:
-        pattern = rf"(?im){label}\s*[:\-]\s*(.+)$"
-        match = re.search(pattern, ocr_text)
+        # Intento 1: "label: valor" o "label- valor" en la misma línea
+        match = re.search(rf"(?im){re.escape(label)}\s*[:\-]\s*(.+)$", ocr_text)
         if match:
             return match.group(1).strip()
+        # Intento 2: label solo en su línea, valor en la línea siguiente (layout Nequi)
+        match = re.search(rf"(?im)^[ \t]*{re.escape(label)}[ \t]*$\r?\n[ \t]*(.+)$", ocr_text)
+        if match:
+            val = match.group(1).strip()
+            if val:
+                return val
     return ""
 
 

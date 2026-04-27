@@ -233,9 +233,9 @@ LOGGING = {
 
 # === Celery — broker Redis, resultados en cache Django existente ===
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'cache+django://')
+CELERY_RESULT_BACKEND = 'redis://redis:6379/1'   # DB 1 para resultados, DB 0 para broker
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_IGNORE_RESULT = True                 # tasks fire-and-forget, nadie consulta el resultado
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True

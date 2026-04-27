@@ -39,6 +39,7 @@ def _send_message(phone_number: str, payload: dict) -> bool:
     try:
         response = requests.post(url, json=data, headers=headers, timeout=10)
         if response.status_code == 200:
+            logger.info(f"Meta API OK — respuesta: {response.text}")
             return True
         else:
             logger.error(f"Error enviando mensaje: {response.status_code} — {response.text}")
@@ -61,9 +62,9 @@ def send_template_confirmation(phone_number: str, transaction) -> bool:
     Envía una plantilla de utilidad (Utility) para confirmar la transacción.
     """
     # Formateo exacto para que coincida con las muestras de Meta
-    monto_formateado = f"{float(transaction.monto):,.0f}"
-    entidad = str(transaction.entity).upper()
-    categoria = str(transaction.category).replace('_', ' ').title()
+    monto_formateado = f"{transaction.get_monto_decimal():,.0f}"
+    entidad = str(transaction.entidad).upper()
+    categoria = str(transaction.categoria).replace('_', ' ').title()
 
     payload = {
         "type": "template",
