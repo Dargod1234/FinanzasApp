@@ -7,4 +7,6 @@ urlpatterns = [
     path('transactions/<int:pk>/', views.transaction_detail, name='transaction-detail'),
     path('transactions/<int:pk>/image/', views.transaction_image, name='transaction-image'),
     path('dashboard/summary/', views.dashboard_summary, name='dashboard-summary'),
+    path('categories/', views.category_list_create, name='category-list-create'),
+    path('categories/<int:pk>/', views.category_delete, name='category-delete'),
 ]

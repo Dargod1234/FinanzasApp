@@ -1,8 +1,22 @@
+import re
 import uuid
 
 from django.db import models
 from django.conf import settings
 from core.fields import EncryptedCharField
+
+
+def _slugify_simple(text: str) -> str:
+    """Genera un slug simple sin dependencias externas."""
+    text = text.lower().strip()
+    text = re.sub(r'[áàäâ]', 'a', text)
+    text = re.sub(r'[éèëê]', 'e', text)
+    text = re.sub(r'[íìïî]', 'i', text)
+    text = re.sub(r'[óòöô]', 'o', text)
+    text = re.sub(r'[úùüû]', 'u', text)
+    text = re.sub(r'[ñ]', 'n', text)
+    text = re.sub(r'[^a-z0-9]+', '_', text)
+    return text.strip('_')[:60]
 
 
 def _uuid7_default():
@@ -195,3 +209,39 @@ class TransactionImage(models.Model):
 
     def __str__(self):
         return f"Image({self.transaction.referencia_bancaria})"
+
+
+class UserCategory(models.Model):
+    """
+    Categorias personalizadas creadas por cada usuario.
+    El campo Transaction.categoria almacena el slug de esta tabla.
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='categories'
+    )
+    name = models.CharField(max_length=50, help_text="Nombre visible de la categoria")
+    icon = models.CharField(max_length=10, default='📦', help_text="Emoji representativo")
+    color = models.CharField(max_length=7, default='#64748B', help_text="Color hex para la UI")
+    slug = models.CharField(max_length=60, help_text="Identificador unico por usuario, generado del nombre")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'transactions_user_category'
+        unique_together = [('user', 'slug')]
+        ordering = ['name']
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = _slugify_simple(self.name)
+            slug = base
+            n = 1
+            while UserCategory.objects.filter(user=self.user, slug=slug).exclude(pk=self.pk).exists():
+                slug = f"{base}_{n}"
+                n += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.user.phone_number}/{self.slug}"

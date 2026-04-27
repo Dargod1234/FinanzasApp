@@ -30,11 +30,24 @@ def classify_transaction_type(ocr_data: dict, user_name: str = None) -> str:
             return 'transferencia_propia'
 
     # Si user_name coincide con destinatario → es ingreso
+    # Comparamos nombre completo Y cada parte por separado para cubrir casos como
+    # "Damian" coincidiendo con el first_name aunque el full_name sea "Damian Apellido"
     if user_name:
         user_lower = user_name.lower()
-        if destinatario and SequenceMatcher(None, user_lower, destinatario).ratio() > 0.7:
+        name_parts = [p for p in user_lower.split() if len(p) >= 3]
+        candidates = [user_lower] + name_parts
+
+        def _matches(field: str) -> bool:
+            if not field:
+                return False
+            return any(
+                SequenceMatcher(None, candidate, field).ratio() > 0.75
+                for candidate in candidates
+            )
+
+        if _matches(destinatario):
             return 'ingreso'
-        if emisor and SequenceMatcher(None, user_lower, emisor).ratio() > 0.7:
+        if _matches(emisor):
             return 'gasto'
 
     return tipo_inicial

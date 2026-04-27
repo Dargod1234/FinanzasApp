@@ -2,7 +2,7 @@ import base64
 
 from rest_framework import serializers
 
-from .models import EncryptedTransaction, Transaction
+from .models import EncryptedTransaction, Transaction, UserCategory
 
 
 class TransactionSerializer(serializers.ModelSerializer):
@@ -55,6 +55,31 @@ class EncryptedTransactionCreateSerializer(serializers.Serializer):
             salt=self._decode_required("salt", expected_len=16),
             crypto_version=validated_data.get("crypto_version", 1),
         )
+
+
+class UserCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserCategory
+        fields = ['id', 'name', 'icon', 'color', 'slug', 'created_at']
+        read_only_fields = ['id', 'slug', 'created_at']
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("El nombre no puede estar vacío.")
+        if len(value) > 50:
+            raise serializers.ValidationError("Máximo 50 caracteres.")
+        return value
+
+    def validate_color(self, value):
+        import re as _re
+        if not _re.match(r'^#[0-9A-Fa-f]{6}$', value):
+            raise serializers.ValidationError("Color debe ser hex de 6 dígitos, ej: #6366F1")
+        return value
+
+    def create(self, validated_data):
+        user = self.context['request'].user
+        return UserCategory.objects.create(user=user, **validated_data)
 
 
 class EncryptedTransactionListSerializer(serializers.ModelSerializer):

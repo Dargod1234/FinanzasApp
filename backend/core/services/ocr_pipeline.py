@@ -67,11 +67,19 @@ def process_receipt_image(
     )
 
     # Paso 5: Categorizar automáticamente
+    # Solo asigna categoria si el slug generado existe entre las categorias del usuario.
+    # Si el usuario no tiene categorias aun (onboarding no completado), queda sin_categorizar.
     if not validated.get('categoria') or validated['categoria'] == 'sin_categorizar':
-        validated['categoria'] = infer_category(
+        suggested = infer_category(
             validated.get('destinatario', ''),
             validated.get('descripcion', '')
         )
+        if suggested != 'sin_categorizar':
+            from transactions.models import UserCategory
+            if UserCategory.objects.filter(user=user, slug=suggested).exists():
+                validated['categoria'] = suggested
+            else:
+                validated['categoria'] = 'sin_categorizar'
 
     # Paso 6 e 7: Dedup y Persistencia
     result = TransactionService.create_from_ocr(
@@ -123,7 +131,7 @@ def _extract_receipt_fields(ocr_text: str) -> dict:
     lowered = ocr_text.lower()
 
     # Identificación de entidad con patrones específicos y más robustos
-    if any(x in lowered for x in ["nequi", "movimiento exitoso", "¡listo!", "listo!"]):
+    if any(x in lowered for x in ["nequi", "negui", "nëgui", "negul", "movimiento exitoso", "¡listo!", "listo!"]):
         entidad = "nequi"
     elif any(x in lowered for x in ["daviplata", "aprobacion", "aprobación"]):
         entidad = "daviplata"

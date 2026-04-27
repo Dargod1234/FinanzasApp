@@ -7,11 +7,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 
-from .models import EncryptedTransaction, Transaction
+from .models import EncryptedTransaction, Transaction, UserCategory
 from .serializers import (
     EncryptedTransactionCreateSerializer,
     EncryptedTransactionListSerializer,
     TransactionSerializer,
+    UserCategorySerializer,
 )
 
 
@@ -190,3 +191,44 @@ def dashboard_summary(request):
         'transacciones_count': active_transactions.count(),
         'confirmed_count': confirmed_count,
     })
+
+
+# ── Categorias personalizadas ────────────────────────────────────────────────
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def category_list_create(request):
+    """
+    GET  /api/categories/ — lista las categorias del usuario autenticado.
+    POST /api/categories/ — crea una nueva categoria.
+    Body: { "name": "Comida", "icon": "🍔", "color": "#F59E0B" }
+    """
+    if request.method == 'GET':
+        cats = UserCategory.objects.filter(user=request.user)
+        serializer = UserCategorySerializer(cats, many=True)
+        return Response(serializer.data)
+
+    serializer = UserCategorySerializer(data=request.data, context={'request': request})
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def category_delete(request, pk):
+    """
+    DELETE /api/categories/{id}/ — elimina la categoria.
+    Las transacciones con esa categoria quedan como 'sin_categorizar'.
+    """
+    try:
+        cat = UserCategory.objects.get(pk=pk, user=request.user)
+    except UserCategory.DoesNotExist:
+        return Response({'detail': 'No encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Resetear transacciones que tenian esta categoria
+    Transaction.objects.filter(user=request.user, categoria=cat.slug).update(
+        categoria='sin_categorizar'
+    )
+    cat.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
