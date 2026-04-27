@@ -61,7 +61,7 @@ def send_template_confirmation(phone_number: str, transaction) -> bool:
     Envía una plantilla de utilidad (Utility) para confirmar la transacción.
     """
     # Formateo exacto para que coincida con las muestras de Meta
-    monto_formateado = f"{float(transaction.amount):,.0f}"
+    monto_formateado = f"{float(transaction.monto):,.0f}"
     entidad = str(transaction.entity).upper()
     categoria = str(transaction.category).replace('_', ' ').title()
 

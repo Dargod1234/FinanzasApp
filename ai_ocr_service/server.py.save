@@ -1,0 +1,62 @@
+import os
+import logging
+
+# STEP 1: Global overrides MUST happen before 'import paddle'
+# Disable the new PIR API and the New IR executor to use the stable legacy engine
+os.environ["FLAGS_enable_pir_api"] = "0"
+os.environ["FLAGS_enable_new_ir_api"] = "0"
+# Completely bypass the problematic oneDNN instruction builder
+os.environ["FLAGS_use_mkldnn"] = "0"
+
+import io
+import numpy as np
+from PIL import Image
+from fastapi import FastAPI, File, UploadFile, HTTPException
+import uvicorn
+
+# Now import Paddle
+import paddle
+from paddleocr import PaddleOCR
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("ocr-service")
+
+app = FastAPI(title="PaddleOCR Stable CPU API")
+
+try:
+    logger.info("Initializing PaddleOCR in Legacy Stable Mode...")
+    # STEP 2: Explicitly pass enable_mkldnn=False to override PaddleX defaults
+    ocr = PaddleOCR(
+        use_angle_cls=True, 
+        lang='es',
+        use_gpu=False,
+        enable_mkldnn=False, # Critical: Bypasses onednn_instruction.cc
+        show_log=False,
+        cpu_threads=4        # Optimized for Docker CPU environments
+    )
+    logger.info("Stable models loaded successfully.")
+except Exception as e:
+    logger.error(f"Initialization failed: {e}")
+    ocr = None
+
+@app.post("/process")
+async def process_image(file: UploadFile = File(...)):
+    if ocr is None: raise HTTPException(status_code=500, detail="OCR engine offline")
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert('RGB')
+        img_array = np.array(image)
+
+        # Use the standard ocr method; PIR-disabled engine handles this stably
+        result = ocr.ocr(img_array)
+
+        extracted_text = [line[1][0] for line in result[0]] if result and result[0] else []
+        
+        logger.info(f"Processed: {len(extracted_text)} lines found.")
+        return {"text": "\n".join(extracted_text), "status": "success"}
+    except Exception as e:
+        logger.error(f"Inference error: {e}")
+        return {"status": "error", "message": str(e)}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
