@@ -144,20 +144,22 @@ def dashboard_summary(request):
             hour=0, minute=0, second=0, microsecond=0
         )
 
-    # Transacciones confirmadas del ciclo actual
-    transactions = Transaction.objects.filter(
+    # Transacciones activas del ciclo (confirmed + pending + needs_review)
+    # Se excluye 'rejected' y 'error' — esas no representan gastos reales
+    active_transactions = Transaction.objects.filter(
         user=user,
-        estado='confirmed',
+        estado__in=['confirmed', 'pending', 'needs_review'],
         fecha_transaccion__gte=cycle_start,
         fecha_transaccion__lte=now,
     )
 
-    # Calcular totales (los montos están encriptados, necesitamos desencriptar)
+    # Calcular totales usando todas las transacciones activas
+    # Pending = procesada por OCR pero aún sin confirmación WhatsApp (puede ser por token expirado)
     total_gastos = Decimal('0')
     total_ingresos = Decimal('0')
     categorias = {}
 
-    for t in transactions:
+    for t in active_transactions:
         monto = t.get_monto_decimal()
         if t.tipo == 'gasto':
             total_gastos += monto
@@ -169,6 +171,7 @@ def dashboard_summary(request):
     salario = profile.get_salario_decimal()
     presupuesto = profile.get_presupuesto_decimal()
     ahorro_real = salario - total_gastos + total_ingresos
+    confirmed_count = active_transactions.filter(estado='confirmed').count()
 
     return Response({
         'ciclo': {
@@ -184,5 +187,6 @@ def dashboard_summary(request):
             float(total_gastos / presupuesto * 100) if presupuesto > 0 else 0
         ),
         'gastos_por_categoria': {k: str(v) for k, v in categorias.items()},
-        'transacciones_count': transactions.count(),
+        'transacciones_count': active_transactions.count(),
+        'confirmed_count': confirmed_count,
     })
