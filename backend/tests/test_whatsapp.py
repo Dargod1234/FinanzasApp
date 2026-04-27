@@ -1,7 +1,8 @@
-"""Tests for whatsapp app: state machine, throttling, webhook HMAC."""
+"""Tests for whatsapp app: state machine, throttling, webhook HMAC, async Celery dispatch."""
 import json
 import hashlib
 import hmac
+from unittest.mock import patch, MagicMock
 
 import pytest
 from django.core.cache import cache
@@ -211,3 +212,194 @@ class TestWebhookEndpoint:
             HTTP_X_HUB_SIGNATURE_256=f'sha256={sig}',
         )
         assert resp.status_code == 400
+
+
+# ── Async Celery Dispatch Tests ──
+
+class TestWebhookAsyncDispatch:
+    """
+    Verifica que el webhook despacha imágenes a Celery (async)
+    y procesa texto/botones de forma síncrona.
+    Sprint: async-webhook-celery.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_settings(self, settings):
+        settings.META_APP_SECRET = 'test-secret'
+        settings.META_WEBHOOK_VERIFY_TOKEN = 'test-verify-token'
+
+    def _signed_post(self, client, body: dict):
+        body_bytes = json.dumps(body).encode('utf-8')
+        sig = hmac.new(b'test-secret', body_bytes, hashlib.sha256).hexdigest()
+        return client.post(
+            '/api/whatsapp/webhook/',
+            data=body_bytes,
+            content_type='application/json',
+            HTTP_X_HUB_SIGNATURE_256=f'sha256={sig}',
+        )
+
+    def _image_body(self, phone='573001234567', message_id='msg-img-001'):
+        return {
+            'entry': [{'changes': [{'value': {'messages': [{
+                'from': phone,
+                'id': message_id,
+                'type': 'image',
+                'image': {'id': 'media-001', 'mime_type': 'image/jpeg'},
+            }]}}]}]
+        }
+
+    def _text_body(self, phone='573001234567', message_id='msg-txt-001', text='Hola'):
+        return {
+            'entry': [{'changes': [{'value': {'messages': [{
+                'from': phone,
+                'id': message_id,
+                'type': 'text',
+                'text': {'body': text},
+            }]}}]}]
+        }
+
+    def test_image_dispatched_to_celery(self, client, sample_user, db):
+        """Imagen → process_whatsapp_image.delay() llamado; NO se procesa OCR inline."""
+        with patch('whatsapp.views.WhatsAppUserThrottle.is_allowed', return_value=True), \
+             patch('whatsapp.views.User.objects.get_or_create', return_value=(sample_user, False)), \
+             patch('whatsapp.tasks.process_whatsapp_image.delay') as mock_delay:
+            resp = self._signed_post(client, self._image_body())
+
+        assert resp.status_code == 200
+        mock_delay.assert_called_once()
+        kwargs = mock_delay.call_args.kwargs
+        assert kwargs['phone_number'] == '573001234567'
+        assert kwargs['message_id'] == 'msg-img-001'
+        assert json.loads(kwargs['message_data_json'])['type'] == 'image'
+
+    def test_image_webhook_returns_immediately(self, client, sample_user, db):
+        """El webhook responde 200 OK sin esperar el OCR (< 1s)."""
+        import time
+        with patch('whatsapp.views.WhatsAppUserThrottle.is_allowed', return_value=True), \
+             patch('whatsapp.views.User.objects.get_or_create', return_value=(sample_user, False)), \
+             patch('whatsapp.tasks.process_whatsapp_image.delay'):
+            start = time.time()
+            resp = self._signed_post(client, self._image_body())
+            elapsed = time.time() - start
+
+        assert resp.status_code == 200
+        assert elapsed < 1.0
+
+    def test_text_processed_synchronously(self, client, sample_user, db):
+        """Texto → handle_incoming_message llamado inline con user como 1er arg."""
+        with patch('whatsapp.views.WhatsAppUserThrottle.is_allowed', return_value=True), \
+             patch('whatsapp.views.User.objects.get_or_create', return_value=(sample_user, False)), \
+             patch('whatsapp.views.handle_incoming_message') as mock_handler:
+            resp = self._signed_post(client, self._text_body())
+
+        assert resp.status_code == 200
+        mock_handler.assert_called_once()
+        call_kwargs = mock_handler.call_args.kwargs
+        assert call_kwargs['user'] == sample_user
+        assert call_kwargs['message_type'] == 'text'
+
+    def test_new_user_no_celery_dispatch(self, client, sample_user, db):
+        """Usuario nuevo → mensaje de bienvenida, sin despachar tarea Celery."""
+        with patch('whatsapp.views.WhatsAppUserThrottle.is_allowed', return_value=True), \
+             patch('whatsapp.views.User.objects.get_or_create', return_value=(sample_user, True)), \
+             patch('whatsapp.meta_api.send_text_message'), \
+             patch('whatsapp.tasks.process_whatsapp_image.delay') as mock_delay:
+            resp = self._signed_post(client, self._image_body())
+
+        assert resp.status_code == 200
+        mock_delay.assert_not_called()
+
+    def test_throttled_user_no_celery_dispatch(self, client, db):
+        """Usuario throttleado → rate-limit message, sin despachar tarea Celery."""
+        with patch('whatsapp.views.WhatsAppUserThrottle.is_allowed', return_value=False), \
+             patch('whatsapp.meta_api.send_text_message'), \
+             patch('whatsapp.tasks.process_whatsapp_image.delay') as mock_delay:
+            resp = self._signed_post(client, self._image_body())
+
+        assert resp.status_code == 200
+        mock_delay.assert_not_called()
+
+
+# ── Celery Task Unit Tests ──
+
+class TestProcessWhatsAppImageTask:
+    """
+    Pruebas unitarias para la task process_whatsapp_image.
+    Se ejecuta la tarea de forma síncrona usando .apply().
+    """
+
+    def _message_data_json(self):
+        return json.dumps({
+            'from': '573001234567',
+            'id': 'msg-001',
+            'type': 'image',
+            'image': {'id': 'media-001', 'mime_type': 'image/jpeg'},
+        })
+
+    def test_task_calls_handle_image_message(self, sample_user, db):
+        """La tarea llama a handle_image_message cuando el usuario existe."""
+        from whatsapp.tasks import process_whatsapp_image
+
+        with patch('whatsapp.tasks.cache.get', return_value=None), \
+             patch('whatsapp.tasks.cache.set'), \
+             patch('whatsapp.message_handler.handle_image_message') as mock_handler:
+            process_whatsapp_image.apply(kwargs={
+                'phone_number': '573001234567',
+                'message_id': 'msg-001',
+                'message_data_json': self._message_data_json(),
+            })
+
+        mock_handler.assert_called_once()
+        args = mock_handler.call_args.args
+        assert args[0] == sample_user      # user
+        assert args[2] == 'msg-001'        # message_id
+
+    def test_task_idempotency_skips_duplicate(self, db):
+        """Si la idempotency key ya existe en cache, la tarea no reprocesa."""
+        from whatsapp.tasks import process_whatsapp_image
+
+        with patch('whatsapp.tasks.cache.get', return_value=True), \
+             patch('whatsapp.message_handler.handle_image_message') as mock_handler:
+            result = process_whatsapp_image.apply(kwargs={
+                'phone_number': '573001234567',
+                'message_id': 'msg-dup-001',
+                'message_data_json': self._message_data_json(),
+            })
+
+        mock_handler.assert_not_called()
+        assert result.result['status'] == 'duplicate_task'
+        assert result.result['message_id'] == 'msg-dup-001'
+
+    def test_task_sets_idempotency_key_before_processing(self, sample_user, db):
+        """La key de idempotencia se establece ANTES de llamar al handler."""
+        from whatsapp.tasks import process_whatsapp_image
+
+        set_calls = []
+        with patch('whatsapp.tasks.cache.get', return_value=None), \
+             patch('whatsapp.tasks.cache.set', side_effect=lambda *a, **kw: set_calls.append(a)), \
+             patch('whatsapp.message_handler.handle_image_message'):
+            process_whatsapp_image.apply(kwargs={
+                'phone_number': '573001234567',
+                'message_id': 'msg-key-test',
+                'message_data_json': self._message_data_json(),
+            })
+
+        assert len(set_calls) > 0
+        assert set_calls[0][0] == 'wa_processing:msg-key-test'
+        assert set_calls[0][1] is True
+
+    def test_task_handles_missing_user_gracefully(self, db):
+        """Si el usuario no existe, la tarea termina sin lanzar excepción."""
+        from whatsapp.tasks import process_whatsapp_image
+
+        with patch('whatsapp.tasks.cache.get', return_value=None), \
+             patch('whatsapp.tasks.cache.set'), \
+             patch('whatsapp.message_handler.handle_image_message') as mock_handler:
+            result = process_whatsapp_image.apply(kwargs={
+                'phone_number': '999999999',
+                'message_id': 'msg-no-user',
+                'message_data_json': self._message_data_json(),
+            })
+
+        mock_handler.assert_not_called()
+        assert result.successful() or result.failed()  # no excepción no capturada

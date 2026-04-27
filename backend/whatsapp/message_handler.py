@@ -9,7 +9,6 @@ from .meta_api import (
     send_template_confirmation,
     download_media,
 )
-from .throttling import WhatsAppUserThrottle
 from core.services.ocr_pipeline import process_receipt_image
 from users.models import User
 from transactions.models import Transaction
@@ -17,38 +16,12 @@ from transactions.models import Transaction
 logger = logging.getLogger(__name__)
 
 
-def handle_incoming_message(phone_number: str, message_id: str,
+def handle_incoming_message(user, phone_number: str, message_id: str,
                             message_type: str, message_data: dict):
     """
     Dispatcher principal. Enruta el mensaje según su tipo.
+    El throttle y la creación de usuario se hacen en views.py antes de llamar aquí.
     """
-    # Rate limiting
-    if not WhatsAppUserThrottle.is_allowed(phone_number):
-        send_text_message(
-            phone_number,
-            "⏳ Has enviado muchos mensajes. Intenta de nuevo en unos minutos."
-        )
-        return
-
-    # Obtener o crear usuario
-    user, created = User.objects.get_or_create(
-        phone_number=f"+{phone_number}",
-        defaults={'username': f"+{phone_number}"}
-    )
-
-    if created:
-        send_text_message(
-            phone_number,
-            "👋 ¡Hola! Soy tu asistente de Finanzas App.\n\n"
-            "Envíame una foto de tu comprobante de pago (Nequi, Daviplata o Bancolombia) "
-            "y yo registro el gasto automáticamente.\n\n"
-            "También puedes preguntarme:\n"
-            "• \"¿Cuánto he gastado este mes?\"\n"
-            "• \"¿Cuál es mi ahorro?\"\n"
-            "• \"Resumen\""
-        )
-        return
-
     # Obtener estado actual de la conversación
     conv_state = ConversationManager.get_state(phone_number)
     current_state = conv_state['state']

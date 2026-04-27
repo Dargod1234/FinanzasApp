@@ -8,6 +8,8 @@ from django.conf import settings
 
 from .meta_api import verify_webhook_signature
 from .message_handler import handle_incoming_message
+from .throttling import WhatsAppUserThrottle
+from users.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +17,6 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def webhook(request):
-    """
-    Endpoint del webhook de WhatsApp.
-    GET: Verificación inicial de Meta.
-    POST: Mensajes entrantes.
-    """
     if request.method == 'GET':
         return verify_webhook(request)
     elif request.method == 'POST':
@@ -27,10 +24,6 @@ def webhook(request):
 
 
 def verify_webhook(request):
-    """
-    Meta envía un GET con hub.challenge para verificar el webhook.
-    Debemos responder con el challenge si el token coincide.
-    """
     mode = request.GET.get('hub.mode')
     token = request.GET.get('hub.verify_token')
     challenge = request.GET.get('hub.challenge')
@@ -44,11 +37,6 @@ def verify_webhook(request):
 
 
 def receive_message(request):
-    """
-    Recibe y procesa mensajes entrantes de WhatsApp.
-    Meta siempre espera 200 OK — el procesamiento real es síncrono en MVP.
-    """
-    # Verificar firma HMAC
     if not verify_webhook_signature(request):
         logger.warning("Firma de webhook inválida — posible spoofing")
         return HttpResponse('Invalid signature', status=403)
@@ -58,7 +46,6 @@ def receive_message(request):
     except json.JSONDecodeError:
         return HttpResponse('Invalid JSON', status=400)
 
-    # Extraer datos del mensaje
     try:
         entry = body.get('entry', [{}])[0]
         changes = entry.get('changes', [{}])[0]
@@ -66,7 +53,7 @@ def receive_message(request):
         messages = value.get('messages', [])
 
         if not messages:
-            # Es una notificación de estado (delivered, read), ignorar
+            # Notificación de estado (delivered, read), ignorar
             return HttpResponse('OK', status=200)
 
         message = messages[0]
@@ -74,13 +61,52 @@ def receive_message(request):
         message_id = message.get('id', '')
         message_type = message.get('type', '')
 
-        # Procesar el mensaje según su tipo
-        handle_incoming_message(
-            phone_number=phone_number,
-            message_id=message_id,
-            message_type=message_type,
-            message_data=message,
+        # Rate limiting — verificar ANTES de cualquier procesamiento
+        if not WhatsAppUserThrottle.is_allowed(phone_number):
+            from .meta_api import send_text_message
+            send_text_message(
+                phone_number,
+                "⏳ Has enviado muchos mensajes. Intenta de nuevo en unos minutos."
+            )
+            return HttpResponse('OK', status=200)
+
+        # Crear usuario si no existe — el task Celery hace .get(), no get_or_create
+        user, created = User.objects.get_or_create(
+            phone_number=f"+{phone_number}",
+            defaults={'username': f"+{phone_number}"}
         )
+
+        if created:
+            from .meta_api import send_text_message
+            send_text_message(
+                phone_number,
+                "👋 ¡Hola! Soy tu asistente de Finanzas App.\n\n"
+                "Envíame una foto de tu comprobante de pago (Nequi, Daviplata o Bancolombia) "
+                "y yo registro el gasto automáticamente.\n\n"
+                "También puedes preguntarme:\n"
+                "• \"¿Cuánto he gastado este mes?\"\n"
+                "• \"¿Cuál es mi ahorro?\"\n"
+                "• \"Resumen\""
+            )
+            return HttpResponse('OK', status=200)
+
+        if message_type == 'image':
+            # ASYNC: despachar a Celery y retornar 200 OK inmediatamente a Meta
+            from whatsapp.tasks import process_whatsapp_image
+            process_whatsapp_image.delay(
+                phone_number=phone_number,
+                message_id=message_id,
+                message_data_json=json.dumps(message),
+            )
+        else:
+            # SÍNCRONO: texto y botones son < 1s, no necesitan async
+            handle_incoming_message(
+                user=user,
+                phone_number=phone_number,
+                message_id=message_id,
+                message_type=message_type,
+                message_data=message,
+            )
 
     except (IndexError, KeyError) as e:
         logger.error(f"Error parseando webhook: {e}")
