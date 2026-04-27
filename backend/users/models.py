@@ -62,6 +62,12 @@ class Profile(models.Model):
         help_text="Día del mes en que inicia el ciclo financiero (1-31)"
     )
     onboarding_completed = models.BooleanField(default=False)
+    plan = models.CharField(
+        max_length=10,
+        choices=[('free', 'Free'), ('premium', 'Premium')],
+        default='free',
+        help_text="Plan del usuario: free (limitado) o premium (ilimitado + WhatsApp)"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
