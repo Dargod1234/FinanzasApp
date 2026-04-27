@@ -265,31 +265,40 @@ def transaction_upload_image(request):
         whatsapp_message_id=None,
     )
 
+    # Pipeline errors (low_quality, not_a_receipt, service_unavailable)
     if 'error' in result:
         return Response({'detail': result.get('message', result['error'])}, status=422)
 
-    if result.get('status') == 'duplicate':
-        return Response({'detail': 'Comprobante duplicado.', 'transaction_id': result.get('transaction_id')}, status=409)
+    # result from TransactionService.create_from_ocr:
+    # {'status': 'created'|'duplicate', 'transaction': <Transaction instance>}
+    tx_obj = result.get('transaction')
 
-    tx_id = result.get('transaction_id')
-    if tx_id:
+    if result.get('status') == 'duplicate':
+        if tx_obj:
+            serializer = TransactionSerializer(tx_obj)
+            return Response(
+                {'detail': result.get('message', 'Comprobante duplicado.'), 'transaction': serializer.data},
+                status=409,
+            )
+        return Response({'detail': 'Comprobante duplicado.'}, status=409)
+
+    if tx_obj:
+        # Guardar imagen asociada al comprobante
         try:
-            tx = Transaction.objects.get(pk=tx_id, user=request.user)
-            # Guardar imagen
             TransactionImage.objects.get_or_create(
-                transaction=tx,
+                transaction=tx_obj,
                 defaults={
                     'image': image_file,
                     'content_type': mime_type,
                     'file_size': len(image_bytes),
                 },
             )
-            serializer = TransactionSerializer(tx)
-            return Response({'transaction': serializer.data}, status=status.HTTP_201_CREATED)
-        except Transaction.DoesNotExist:
-            pass
+        except Exception:
+            pass  # La imagen es opcional, no bloquea la respuesta
+        serializer = TransactionSerializer(tx_obj)
+        return Response({'transaction': serializer.data}, status=status.HTTP_201_CREATED)
 
-    return Response({'detail': 'Procesado pero sin transacción creada.'}, status=422)
+    return Response({'detail': 'No se pudo procesar el comprobante.'}, status=422)
 
 
 @api_view(['POST'])
