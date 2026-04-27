@@ -10,6 +10,15 @@ def classify_transaction_type(ocr_data: dict, user_name: str = None) -> str:
     destinatario = (ocr_data.get('destinatario', '') or '').lower().strip()
     tipo_inicial = ocr_data.get('tipo', 'gasto')
 
+    # Keywords explícitas en el texto OCR (mayor prioridad — cubre Nequi Bre-B, etc.)
+    raw_text = (ocr_data.get('raw_response', '') or '').lower()
+    income_kw = ["recibiste", "te llegaron", "te llegó", "te llego", "recibido por", "depósito recibido", "deposito recibido"]
+    expense_kw = ["enviaste", "transferiste", "pagaste", "debitado", "enviado a"]
+    if any(kw in raw_text for kw in income_kw):
+        return 'ingreso'
+    if any(kw in raw_text for kw in expense_kw):
+        return 'gasto'
+
     # Si no hay emisor ni destinatario, conservar el tipo inicial
     if not emisor and not destinatario:
         return tipo_inicial

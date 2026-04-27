@@ -127,7 +127,7 @@ def _extract_receipt_fields(ocr_text: str) -> dict:
         entidad = "nequi"
     elif any(x in lowered for x in ["daviplata", "aprobacion", "aprobación"]):
         entidad = "daviplata"
-    elif any(x in lowered for x in ["bancolombia", "transferencia procesada", "valor enviado", "sucursal virtual"]):
+    elif any(x in lowered for x in ["bancolombia", "bre-b", "bre b", "transferencia procesada", "valor enviado", "sucursal virtual"]):
         entidad = "bancolombia"
     else:
         entidad = "otro"
@@ -135,7 +135,7 @@ def _extract_receipt_fields(ocr_text: str) -> dict:
     monto_raw, monto_source = _extract_amount_with_source(ocr_text, entidad)
     referencia = _extract_reference(ocr_text, entidad)
     fecha = _extract_date(ocr_text)
-    destinatario = _extract_labeled_value(ocr_text, ["destinatario", "para", "recibe", "a:"])
+    destinatario = _extract_labeled_value(ocr_text, ["destinatario", "enviado a", "para", "recibe", "a:"])
     emisor = _extract_labeled_value(ocr_text, ["emisor", "de", "origen", "desde:"])
     descripcion = _extract_labeled_value(ocr_text, ["concepto", "descripcion", "descripción", "detalle", "mensaje"])
 
@@ -230,6 +230,8 @@ def _extract_amount_with_source(ocr_text: str, entidad: str) -> tuple:
             r"(?im)(?:monto|valor|total)\s*[:\$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
         ],
         "bancolombia": [
+            # "Valor de la transferencia" en su línea, monto en la siguiente (layout Bre-B)
+            r"(?im)^[ \t]*valor\s+de\s+la\s+transferencia[ \t]*$\r?\n[ \t]*\$?\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
             r"(?im)(?:valor enviado|valor|monto|total)\s*[:$\-\s]*\s*([0-9]{1,3}(?:[\.,]\d{3})*(?:[,\.]\d{1,2})?)",
         ],
     }
@@ -275,7 +277,7 @@ def _extract_reference(ocr_text: str, entidad: str = "otro") -> str:
     entity_patterns = {
         "nequi": r"(?im)(?:referencia|id|n[uú]mero)\s*[:#\-\s]*\s*([a-z0-9]{6,20})",
         "daviplata": r"(?im)(?:aprobaci[oó]n|referencia|c[oó]digo)\s*[:#\-\s]*\s*([a-z0-9]{6,20})",
-        "bancolombia": r"(?im)(?:comprobante|referencia|id\s*transacci[oó]n)\s*[:#\-\s]*\s*([a-z0-9]{6,20})",
+        "bancolombia": r"(?im)(?:comprobante|referencia|id\s*transacci[oó]n)\s*(?:no\.?\s*)?[:#\-\s]*\s*([a-z0-9]{6,25})",
     }
 
     if entidad in entity_patterns:
@@ -302,6 +304,20 @@ _MONTHS_ES = {
     'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12,
 }
 
+_MONTHS_SHORT_ES = {
+    'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'ago': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dic': 12,
+}
+
+
+def _parse_meridiem(hour: int, minute: int, meridiem: str) -> tuple:
+    m = meridiem.lower().replace('.', '').replace(' ', '')
+    if m.startswith('p') and hour < 12:
+        hour += 12
+    elif m.startswith('a') and hour == 12:
+        hour = 0
+    return hour, minute
+
 
 def _extract_date(ocr_text: str) -> str:
     # Patrones numéricos estándar (prioridad alta)
@@ -316,7 +332,26 @@ def _extract_date(ocr_text: str) -> str:
         if match:
             return match.group(1)
 
-    # Fecha en texto español: "21 de abril de 2026 a las 05:46 p.m"
+    # Fecha abreviada Bre-B: "09 mar. 2026 - 12:48 p.m."
+    short_match = re.search(
+        r"(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)\.?\s+(\d{4})"
+        r"(?:.*?(\d{1,2}):(\d{2})\s*(a\.?\s*m\.?|p\.?\s*m\.?))?",
+        ocr_text, re.IGNORECASE
+    )
+    if short_match:
+        day = int(short_match.group(1))
+        mon = _MONTHS_SHORT_ES[short_match.group(2).lower()[:3]]
+        year = int(short_match.group(3))
+        if short_match.group(4):
+            hour, minute = _parse_meridiem(
+                int(short_match.group(4)),
+                int(short_match.group(5)),
+                short_match.group(6) or ''
+            )
+            return f"{year:04d}-{mon:02d}-{day:02d} {hour:02d}:{minute:02d}"
+        return f"{year:04d}-{mon:02d}-{day:02d}"
+
+    # Fecha en texto español completo: "21 de abril de 2026 a las 05:46 p.m"
     text_match = re.search(
         r"(\d{1,2})\s+de\s+"
         r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto"
@@ -329,13 +364,11 @@ def _extract_date(ocr_text: str) -> str:
         mon = _MONTHS_ES[text_match.group(2).lower()]
         year = int(text_match.group(3))
         if text_match.group(4):
-            hour = int(text_match.group(4))
-            minute = int(text_match.group(5))
-            meridiem = text_match.group(6) or ""
-            if 'p' in meridiem.lower() and hour < 12:
-                hour += 12
-            elif 'a' in meridiem.lower() and hour == 12:
-                hour = 0
+            hour, minute = _parse_meridiem(
+                int(text_match.group(4)),
+                int(text_match.group(5)),
+                text_match.group(6) or ''
+            )
             return f"{year:04d}-{mon:02d}-{day:02d} {hour:02d}:{minute:02d}"
         return f"{year:04d}-{mon:02d}-{day:02d}"
 

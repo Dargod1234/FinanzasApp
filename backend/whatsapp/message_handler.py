@@ -166,6 +166,19 @@ def handle_image_message(user, phone_number, message_id, message_data):
                 transaction.save(update_fields=['categoria'])
                 logger.info("Categoría '%s' inferida del caption para tx=%s", inferred_cat, transaction.id)
 
+            # Override de tipo (ingreso/gasto) si el usuario lo indica en el caption
+            _INGRESO_CAPTIONS = ["ingreso", "me pagaron", "me transfirieron", "recibí", "recibi", "me llegó", "me llego"]
+            _GASTO_CAPTIONS   = ["gasto", "pagué", "pague", "gasté", "gaste", "envié", "envie"]
+            cap_lower = caption.lower()
+            if any(kw in cap_lower for kw in _INGRESO_CAPTIONS):
+                transaction.tipo = 'ingreso'
+                transaction.save(update_fields=['tipo'])
+                logger.info("Tipo sobreescrito a 'ingreso' por caption para tx=%s", transaction.id)
+            elif any(kw in cap_lower for kw in _GASTO_CAPTIONS):
+                transaction.tipo = 'gasto'
+                transaction.save(update_fields=['tipo'])
+                logger.info("Tipo sobreescrito a 'gasto' por caption para tx=%s", transaction.id)
+
             # CAMBIO: Usamos plantilla Utility en lugar de botones manuales
             # Esto optimiza costos y profesionaliza el flujo (Abril 2026)
             exito = send_template_confirmation(phone_number, transaction)

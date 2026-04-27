@@ -13,10 +13,10 @@ class TransactionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'tipo', 'entidad', 'categoria', 'destinatario',
             'fecha_transaccion', 'descripcion', 'estado',
-            'confianza_ia', 'monto_display', 'created_at',
+            'confianza_ia', 'monto_display', 'referencia_bancaria', 'created_at',
         ]
         read_only_fields = [
-            'id', 'monto_display', 'confianza_ia', 'created_at',
+            'id', 'monto_display', 'confianza_ia', 'referencia_bancaria', 'created_at',
         ]
 
     def get_monto_display(self, obj):
