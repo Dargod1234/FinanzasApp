@@ -33,6 +33,13 @@ class PhoneRegistrationSerializer(serializers.Serializer):
 class ProfileSerializer(serializers.ModelSerializer):
     salario_mensual = serializers.CharField(required=False, allow_blank=True)
     presupuesto_mensual = serializers.CharField(required=False, allow_blank=True)
+    # Campos del User — se leen/escriben mediante source y override de update()
+    first_name = serializers.CharField(
+        source='user.first_name', required=False, allow_blank=True, default=''
+    )
+    last_name = serializers.CharField(
+        source='user.last_name', required=False, allow_blank=True, default=''
+    )
 
     class Meta:
         model = Profile
@@ -41,4 +48,19 @@ class ProfileSerializer(serializers.ModelSerializer):
             'presupuesto_mensual',
             'dia_corte',
             'onboarding_completed',
+            'first_name',
+            'last_name',
         ]
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop('user', {})
+        fields_to_save = []
+        if 'first_name' in user_data:
+            instance.user.first_name = user_data['first_name']
+            fields_to_save.append('first_name')
+        if 'last_name' in user_data:
+            instance.user.last_name = user_data['last_name']
+            fields_to_save.append('last_name')
+        if fields_to_save:
+            instance.user.save(update_fields=fields_to_save)
+        return super().update(instance, validated_data)
