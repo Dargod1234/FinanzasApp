@@ -1,6 +1,8 @@
 import type {
   AuthResponse,
   DashboardSummary,
+  EncryptedTransactionPayload,
+  EncryptedTransactionRecord,
   PaginatedResponse,
   Profile,
   Transaction,
@@ -147,6 +149,24 @@ class ApiClient {
       headers: {
         Authorization: `Bearer ${await getToken('access')}`,
       },
+    });
+  }
+
+  async listEncryptedTransactions(
+    page = 1
+  ): Promise<PaginatedResponse<EncryptedTransactionRecord>> {
+    const params = new URLSearchParams({ page: String(page) });
+    return this.request<PaginatedResponse<EncryptedTransactionRecord>>(
+      `/api/encrypted-transactions/?${params.toString()}`
+    );
+  }
+
+  async createEncryptedTransaction(
+    payload: EncryptedTransactionPayload
+  ): Promise<EncryptedTransactionRecord> {
+    return this.request<EncryptedTransactionRecord>('/api/encrypted-transactions/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 }

@@ -1,8 +1,8 @@
-import logging
 import gc
 import io
-from typing import Optional
 import json
+import logging
+from typing import Optional
 
 import requests
 from django.conf import settings
@@ -10,6 +10,11 @@ from django.conf import settings
 from .circuit_breaker import ocr_breaker
 
 logger = logging.getLogger(__name__)
+
+# Tamaño mínimo al que se hace upscale si la imagen es pequeña
+_MIN_DIMENSION_PX = 1000
+# Factor de upscale máximo para evitar imágenes demasiado grandes
+_MAX_UPSCALE_FACTOR = 3.0
 
 
 class OCRLocalService:
@@ -19,6 +24,7 @@ class OCRLocalService:
     def extract_text(image_bytes: bytes, mime_type: str = "image/jpeg") -> Optional[str]:
         """
         Envia bytes de imagen al motor OCR local y retorna texto plano.
+        Aplica preprocesamiento con Pillow antes de enviar para mejorar calidad OCR.
         Nunca expone imagenes ni texto sensible en logs.
         """
         if not image_bytes:
@@ -29,11 +35,17 @@ class OCRLocalService:
             logger.warning("Circuit breaker OPEN para OCR local")
             return None
 
+        # Preprocesar imagen para mejorar calidad antes de enviar al OCR
+        processed_bytes = OCRLocalService._preprocess_image(image_bytes, mime_type)
+        if processed_bytes is None:
+            logger.warning("Preprocesamiento de imagen falló — usando imagen original")
+            processed_bytes = image_bytes
+
         url = getattr(settings, "OCR_SERVICE_URL", "http://ocr-engine:8000/process")
-        payload = bytearray(image_bytes)
+        payload = bytearray(processed_bytes)
         image_stream = io.BytesIO(payload)
         files = {
-            "file": ("comprobante", image_stream, mime_type or "application/octet-stream")
+            "file": ("comprobante", image_stream, "image/jpeg")
         }
 
         try:
@@ -62,8 +74,71 @@ class OCRLocalService:
             payload[:] = b"\x00" * len(payload)
             del payload
             del image_stream
-            del image_bytes
+            del processed_bytes
             gc.collect()
+
+    @staticmethod
+    def _preprocess_image(image_bytes: bytes, mime_type: str) -> Optional[bytes]:
+        """
+        Aplica preprocesamiento para mejorar la calidad del OCR:
+        1. Convierte a escala de grises
+        2. Aumenta contraste con ImageEnhance
+        3. Aplica sharpening
+        4. Upscale si la imagen es muy pequeña (< _MIN_DIMENSION_PX en cualquier eje)
+        5. Exporta como JPEG optimizado para el motor OCR
+
+        Retorna bytes procesados o None si falla (el caller usará la imagen original).
+        """
+        try:
+            from PIL import Image, ImageEnhance, ImageFilter
+        except ImportError:
+            logger.debug("Pillow no disponible — saltando preprocesamiento")
+            return None
+
+        try:
+            img = Image.open(io.BytesIO(image_bytes))
+
+            # Convertir a RGB si es RGBA, P (paleta) u otro modo
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+
+            # Upscale si la imagen es demasiado pequeña
+            width, height = img.size
+            min_dim = min(width, height)
+            if min_dim < _MIN_DIMENSION_PX:
+                scale = min(_MIN_DIMENSION_PX / min_dim, _MAX_UPSCALE_FACTOR)
+                new_w = int(width * scale)
+                new_h = int(height * scale)
+                img = img.resize((new_w, new_h), Image.LANCZOS)
+                logger.debug(
+                    "Imagen upscaled: %dx%d → %dx%d (factor=%.2f)",
+                    width, height, new_w, new_h, scale
+                )
+
+            # Convertir a escala de grises (mejora rendimiento OCR en texto negro sobre blanco)
+            img = img.convert("L")
+
+            # Aumentar contraste (factor 1.5 = incremento moderado)
+            img = ImageEnhance.Contrast(img).enhance(1.5)
+
+            # Sharpening suave para definir bordes de letras
+            img = img.filter(ImageFilter.SHARPEN)
+
+            # Exportar como JPEG de alta calidad en escala de grises
+            output = io.BytesIO()
+            img.save(output, format="JPEG", quality=90, optimize=True)
+            result = output.getvalue()
+            output.close()
+
+            logger.debug(
+                "Preprocesamiento OK: %d bytes → %d bytes",
+                len(image_bytes), len(result)
+            )
+            return result
+
+        except Exception as exc:
+            logger.warning("Error en preprocesamiento de imagen: %s", exc)
+            return None
 
     @staticmethod
     def _parse_ocr_response(response: requests.Response) -> str:
@@ -75,7 +150,6 @@ class OCRLocalService:
         content_type = (response.headers.get("Content-Type") or "").lower()
         body = response.text or ""
 
-        # Si el servidor declara JSON, o el cuerpo parece JSON, intentar parsear.
         if "application/json" in content_type or body.strip().startswith("{"):
             try:
                 parsed = response.json()

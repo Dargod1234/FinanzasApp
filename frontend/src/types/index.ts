@@ -38,6 +38,22 @@ export interface TransactionDetail extends Transaction {
   referencia_bancaria: string;
 }
 
+export interface EncryptedTransactionPayload {
+  ciphertext: string;
+  iv: string;
+  salt: string;
+  crypto_version?: number;
+}
+
+export interface EncryptedTransactionRecord {
+  id: string;
+  ciphertext: string;
+  iv: string;
+  salt: string;
+  crypto_version: number;
+  created_at: string;
+}
+
 // === Dashboard ===
 export interface DashboardSummary {
   ciclo: {

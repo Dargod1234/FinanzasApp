@@ -1,10 +1,17 @@
 import { useState, useCallback } from 'react';
 import { api } from '../services/api';
-import type { Transaction, TransactionDetail, PaginatedResponse } from '../types';
+import type {
+  EncryptedTransactionPayload,
+  EncryptedTransactionRecord,
+  PaginatedResponse,
+  Transaction,
+  TransactionDetail,
+} from '../types';
 
 export function useTransactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [detail, setDetail] = useState<TransactionDetail | null>(null);
+  const [encryptedRecords, setEncryptedRecords] = useState<EncryptedTransactionRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -79,9 +86,21 @@ export function useTransactions() {
     }
   }, []);
 
+  const saveEncryptedTransaction = useCallback(async (payload: EncryptedTransactionPayload) => {
+    try {
+      const created = await api.createEncryptedTransaction(payload);
+      setEncryptedRecords((prev) => [created, ...prev]);
+      return created;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error guardando transacción cifrada');
+      return null;
+    }
+  }, []);
+
   return {
     transactions,
     detail,
+    encryptedRecords,
     loading,
     error,
     total,
@@ -91,5 +110,6 @@ export function useTransactions() {
     getDetail,
     updateCategory,
     deleteTransaction,
+    saveEncryptedTransaction,
   };
 }
