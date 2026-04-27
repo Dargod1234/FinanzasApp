@@ -33,7 +33,11 @@ try:
         use_gpu=False,
         enable_mkldnn=False,
         ocr_version='PP-OCRv4',
-        show_log=False
+        show_log=False,
+        use_angle_cls=True,   # Detecta y corrige orientación del texto (imágenes inclinadas)
+        cpu_threads=4,        # Mejora throughput en CPU dentro de Docker
+        det_db_thresh=0.3,    # Umbral de detección más permisivo para texto pequeño
+        rec_batch_num=6,      # Batch de reconocimiento
     )
     logger.info("OCR Engine ready.")
 except Exception as e:
@@ -59,11 +63,22 @@ async def process_image(file: UploadFile = File(...)):
         result = ocr.ocr(img_array)
         extracted_text = [line[1][0] for line in result[0]] if result and result[0] else []
 
+        # Logging de calidad estructurado para diagnóstico
+        total_boxes = len(result[0]) if result and result[0] else 0
+        confidences = [
+            line[1][1]
+            for line in (result[0] or [])
+            if line and len(line) > 1 and line[1] and len(line[1]) > 1
+        ]
+        avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
+        joined_text = "\n".join(extracted_text)
+
         logger.info(
-            f"Ephemeral Process: Success. {len(extracted_text)} lines found and purged from RAM."
+            "OCR completado: boxes=%d, avg_conf_paddle=%.3f, chars=%d, lines=%d",
+            total_boxes, avg_conf, len(joined_text), len(extracted_text)
         )
         return {
-            "text": "\n".join(extracted_text),
+            "text": joined_text,
             "status": "success",
         }
     except Exception as e:
